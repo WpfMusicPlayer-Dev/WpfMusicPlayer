@@ -1,6 +1,0 @@
-C:/Users/madoka/source/repos/PlaygroundTest/MusicPlayerLibrary/vcpkg_installed/x64-windows/vcpkg/blds/rapidjson/x64-windows-rel/CMakeFiles/travis_doc.dir
-C:/Users/madoka/source/repos/PlaygroundTest/MusicPlayerLibrary/vcpkg_installed/x64-windows/vcpkg/blds/rapidjson/x64-windows-rel/CMakeFiles/edit_cache.dir
-C:/Users/madoka/source/repos/PlaygroundTest/MusicPlayerLibrary/vcpkg_installed/x64-windows/vcpkg/blds/rapidjson/x64-windows-rel/CMakeFiles/rebuild_cache.dir
-C:/Users/madoka/source/repos/PlaygroundTest/MusicPlayerLibrary/vcpkg_installed/x64-windows/vcpkg/blds/rapidjson/x64-windows-rel/CMakeFiles/list_install_components.dir
-C:/Users/madoka/source/repos/PlaygroundTest/MusicPlayerLibrary/vcpkg_installed/x64-windows/vcpkg/blds/rapidjson/x64-windows-rel/CMakeFiles/install.dir
-C:/Users/madoka/source/repos/PlaygroundTest/MusicPlayerLibrary/vcpkg_installed/x64-windows/vcpkg/blds/rapidjson/x64-windows-rel/CMakeFiles/install/local.dir

@@ -1,6 +1,0 @@
-Package: cpp-base64
-Version: V2.rc.08
-Architecture: x64-windows
-Multi-Arch: same
-Abi: 14e8c39c20e0dae239125107bcc7e6f90f436ca419a9192e4a2e3a3ae9ddd39b
-Description: Base64 encoding and decoding with c++.
