@@ -4,9 +4,14 @@
         xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
         xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
         xmlns:local="clr-namespace:WpfMusicPlayer"
+        xmlns:vm="clr-namespace:WpfMusicPlayer.ViewModels"
         mc:Ignorable="d"
+        d:DataContext="{d:DesignInstance Type=vm:MainViewModel}"
         Title="WpfMusicPlayer" Height="600" Width="800"
-        Background="#222222">
+        Background="#222222"
+        AllowDrop="True"
+        Drop="MainWindow_Drop"
+        Closed="MainWindow_Closed">
     <Grid>
         <Grid.RowDefinitions>
             <RowDefinition Height="*"/>
@@ -23,19 +28,19 @@
                 <Border Width="240" Height="240" CornerRadius="10" Background="#444444" Margin="0,0,0,20">
                     <Grid>
                         <TextBlock Text="Album Cover" Foreground="#888888" HorizontalAlignment="Center" VerticalAlignment="Center" />
-                        <Image Stretch="UniformToFill" x:Name="AlbumCoverImage"/>
+                        <Image Stretch="UniformToFill" Source="{Binding AlbumCoverImage}"/>
                     </Grid>
                 </Border>
                 <Viewbox StretchDirection="DownOnly" MaxHeight="32" Margin="0,0,0,10">
-                    <TextBlock x:Name="SongTitleTextBlock" Text="Song Title" Foreground="White" FontSize="24" FontWeight="Bold" TextWrapping="NoWrap"/>
+                    <TextBlock Text="{Binding SongTitle}" Foreground="White" FontSize="24" FontWeight="Bold" TextWrapping="NoWrap"/>
                 </Viewbox>
                 <Viewbox StretchDirection="DownOnly" MaxHeight="22">
-                    <TextBlock x:Name="ArtistTextBlock" Text="Artist Name" Foreground="#BBBBBB" FontSize="16" TextWrapping="NoWrap"/>
+                    <TextBlock Text="{Binding ArtistName}" Foreground="#BBBBBB" FontSize="16" TextWrapping="NoWrap"/>
                 </Viewbox>
             </StackPanel>
 
             <ScrollViewer Grid.Column="1" HorizontalScrollBarVisibility="Disabled" VerticalScrollBarVisibility="Hidden" Margin="20,0,0,0">
-                <ListBox x:Name="LyricsListBox" Background="Transparent" BorderThickness="0" HorizontalContentAlignment="Center" d:ItemsSource="{d:SampleData ItemCount=5}">
+                <ListBox ItemsSource="{Binding Lyrics}" Background="Transparent" BorderThickness="0" HorizontalContentAlignment="Center" VerticalContentAlignment="Center">
                     <ListBox.ItemTemplate>
                         <DataTemplate>
                             <TextBlock Text="{Binding}" Foreground="#DDDDDD" FontSize="16" Margin="0,8" TextAlignment="Center"/>
@@ -58,9 +63,10 @@
                         <ColumnDefinition Width="*"/>
                         <ColumnDefinition Width="Auto"/>
                     </Grid.ColumnDefinitions>
-                    <TextBlock x:Name="CurrentTimeTextBlock" Grid.Column="0" Text="0:00" Foreground="#DDDDDD" VerticalAlignment="Center" Margin="0,0,10,0"/>
-                    <Slider x:Name="ProgressSlider" Grid.Column="1" Minimum="0" Maximum="100" Value="0" VerticalAlignment="Center" />
-                    <TextBlock x:Name="TotalTimeTextBlock" Grid.Column="2" Text="3:30" Foreground="#DDDDDD" VerticalAlignment="Center" Margin="10,0,0,0"/>
+                    <TextBlock Grid.Column="0" Text="{Binding CurrentTime}" Foreground="#DDDDDD" VerticalAlignment="Center" Margin="0,0,10,0"/>
+                    <Slider Grid.Column="1" Minimum="0" Maximum="{Binding ProgressMaximum}" Value="{Binding ProgressValue, Mode=TwoWay}" VerticalAlignment="Center"
+                            PreviewMouseDown="ProgressSlider_PreviewMouseDown" PreviewMouseUp="ProgressSlider_PreviewMouseUp"/>
+                    <TextBlock Grid.Column="2" Text="{Binding TotalTime}" Foreground="#DDDDDD" VerticalAlignment="Center" Margin="10,0,0,0"/>
                 </Grid>
 
                 <Grid Grid.Row="1">
@@ -70,17 +76,17 @@
                         <ColumnDefinition Width="1*"/>
                     </Grid.ColumnDefinitions>
 
-                    <Button x:Name="OpenButton" Grid.Column="0" Content="&#x1F4C2; Open" HorizontalAlignment="Left" VerticalAlignment="Center" FontSize="16" Foreground="White" Background="#444444" Padding="15,8" BorderThickness="0" Cursor="Hand" Margin="10,0,0,0"/>
+                    <Button Grid.Column="0" Command="{Binding OpenCommand}" Content="&#x1F4C2; Open" HorizontalAlignment="Left" VerticalAlignment="Center" FontSize="16" Foreground="White" Background="#444444" Padding="15,8" BorderThickness="0" Cursor="Hand" Margin="10,0,0,0"/>
 
                     <StackPanel Grid.Column="1" Orientation="Horizontal" HorizontalAlignment="Center" VerticalAlignment="Center">
-                        <Button x:Name="PrevButton" Content="&#x23EE;" FontSize="24" Margin="10,0" Width="50" Height="50" Background="Transparent" Foreground="White" BorderThickness="0"/>
-                        <Button x:Name="PlayPauseButton" Content="&#x25B6;" FontSize="28" Margin="10,0" Width="60" Height="60" Background="#0078D7" Foreground="White" BorderThickness="0" />
-                        <Button x:Name="NextButton" Content="&#x23ED;" FontSize="24" Margin="10,0" Width="50" Height="50" Background="Transparent" Foreground="White" BorderThickness="0"/>
+                        <Button Command="{Binding PrevCommand}" Content="&#x23EE;" FontSize="24" Margin="10,0" Width="50" Height="50" Background="Transparent" Foreground="White" BorderThickness="0"/>
+                        <Button Command="{Binding PlayPauseCommand}" Content="{Binding PlayPauseContent}" FontSize="28" Margin="10,0" Width="60" Height="60" Background="#0078D7" Foreground="White" BorderThickness="0" />
+                        <Button Command="{Binding NextCommand}" Content="&#x23ED;" FontSize="24" Margin="10,0" Width="50" Height="50" Background="Transparent" Foreground="White" BorderThickness="0"/>
                     </StackPanel>
 
                     <StackPanel Grid.Column="2" Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Center">
                         <TextBlock Text="&#x1F50A;" FontSize="20" Foreground="White" VerticalAlignment="Center" Margin="0,0,10,0"/>
-                        <Slider x:Name="VolumeSlider" Width="100" Minimum="0" Maximum="1" Value="0.5" VerticalAlignment="Center"/>
+                        <Slider Width="100" Minimum="0" Maximum="1" Value="{Binding Volume, Mode=TwoWay}" VerticalAlignment="Center"/>
                     </StackPanel>
                 </Grid>
             </Grid>

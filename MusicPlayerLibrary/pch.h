@@ -102,5 +102,10 @@ extern "C" {
 #define tstring string
 #endif
 #endif
-
+#if !defined(WAY3RES)
+#define WAY3RES(ord) \
+((ord) == std::strong_ordering::less ? ThreeWayCompareResult::Less : \
+(ord) == std::strong_ordering::greater ? ThreeWayCompareResult::Greater : \
+ThreeWayCompareResult::Equal)
+#endif
 #endif //PCH_H

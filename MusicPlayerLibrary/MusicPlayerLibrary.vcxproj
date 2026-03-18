@@ -131,6 +131,7 @@
   </ItemDefinitionGroup>
   <ItemGroup>
     <ClInclude Include="AtlTraceRedirect.h" />
+    <ClInclude Include="LrcFileController.h" />
     <ClInclude Include="MusicPlayerLibrary.h" />
     <ClInclude Include="pch.h" />
     <ClInclude Include="Resource.h" />
@@ -138,6 +139,7 @@
   <ItemGroup>
     <ClCompile Include="AssemblyInfo.cpp" />
     <ClCompile Include="AtlTraceRedirect.cpp" />
+    <ClCompile Include="LrcFileController.cpp" />
     <ClCompile Include="MusicPlayerLibrary.cpp" />
     <ClCompile Include="NcmDecryptor.cpp" />
     <ClCompile Include="pch.cpp">

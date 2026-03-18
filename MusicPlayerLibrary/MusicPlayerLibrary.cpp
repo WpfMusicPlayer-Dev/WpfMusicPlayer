@@ -1285,6 +1285,7 @@ void MusicPlayerLibrary::MusicPlayerNative::stop_audio_playback(int mode)
 		elapsed_time = pts_time_f = 0.0f;
 	}
 	UINT32 raw = *reinterpret_cast<UINT32*>(&pts_time_f);
+	suppress_time_events = false;
 	managed_music_player->ProcessEvent(WM_PLAYER_TIME_CHANGE, raw, 0);
 	// AfxGetMainWnd()->PostMessage(WM_PLAYER_TIME_CHANGE, raw);
 	ResetEvent(frame_underrun_event);
@@ -1656,6 +1657,7 @@ void MusicPlayerLibrary::MusicPlayerNative::OpenFile(const CString& fileName, co
 		return;
 	};
 	managed_music_player->ProcessEvent(WM_PLAYER_FILE_INIT, 0, 0);
+	managed_music_player->ProcessEvent(WM_PLAYER_TIME_CHANGE, 0, 0);
 	// AfxGetMainWnd()->PostMessage(WM_PLAYER_FILE_INIT);
 }
 
@@ -1669,6 +1671,15 @@ float MusicPlayerLibrary::MusicPlayerNative::GetMusicTimeLength()
 			length = static_cast<float>(static_cast<double>(duration) * av_q2d(time_base));
 		}
 		return length;
+	}
+	return 0.0f;
+}
+
+float MusicPlayerLibrary::MusicPlayerNative::GetCurrentMusicPosition()
+{
+	if (IsInitialized())
+	{
+		return elapsed_time;
 	}
 	return 0.0f;
 }
@@ -1722,6 +1733,7 @@ void MusicPlayerLibrary::MusicPlayerNative::SeekToPosition(float time, bool need
 		{
 			if (need_stop && (IsPlaying() || audio_player_worker_thread))
 			{
+				suppress_time_events = true;
 				user_request_stop = true;
 				stop_audio_playback(0);
 			}
@@ -1866,6 +1878,9 @@ void MusicPlayerLibrary::MusicPlayer::check_if_null()
 
 void MusicPlayerLibrary::MusicPlayer::ProcessEvent(MessageType event_type, WPARAM wParam, LPARAM lParam)
 {
+	if (event_type == WM_PLAYER_TIME_CHANGE && native_handle && native_handle->suppress_time_events)
+		return;
+
 	ProcessEventState^ state = gcnew ProcessEventState();
 	state->EventType = event_type;
 	state->WParam = IntPtr(static_cast<long long>(wParam));
@@ -1886,6 +1901,10 @@ void MusicPlayerLibrary::MusicPlayer::ProcessEventCore(Object^ stateObj)
 		break;
 	case WM_PLAYER_ALBUM_ART_INIT:
 		if (OnPlayerAlbumArtInit) {
+			if (wParam == 0) {
+				OnPlayerAlbumArtInit(nullptr);
+				break;
+			}
 			IntPtr hBitmap = static_cast<IntPtr>(static_cast<long long>(wParam));
 			System::Drawing::Image^ bitmap = System::Drawing::Image::FromHbitmap(hBitmap);
 			OnPlayerAlbumArtInit(bitmap);
@@ -1967,11 +1986,18 @@ float MusicPlayerLibrary::MusicPlayer::GetMusicTimeLength()
 	return native_handle->GetMusicTimeLength();
 }
 
+float MusicPlayerLibrary::MusicPlayer::GetCurrentMusicPosition()
+{
+	check_if_null();
+	return native_handle->GetCurrentMusicPosition();
+}
+
 System::String^ MusicPlayerLibrary::MusicPlayer::GetSongTitle()
 {
 	check_if_null();
 	CString title = native_handle->GetSongTitle();
 	// TODO: 在此处插入 return 语句
+	if (title.IsEmpty()) return nullptr;
 	return msclr::interop::marshal_as<System::String^>(title.GetString());
 }
 
@@ -1980,6 +2006,7 @@ System::String^ MusicPlayerLibrary::MusicPlayer::GetSongArtist()
 	check_if_null();
 	CString artist = native_handle->GetSongArtist();
 	// TODO: 在此处插入 return 语句
+	if (artist.IsEmpty()) return nullptr;
 	return msclr::interop::marshal_as<System::String^>(artist.GetString());
 }
 
@@ -2055,7 +2082,6 @@ void MusicPlayerLibrary::MusicPlayer::SetEqualizerBand(int index, int value)
 
 void MusicPlayerLibrary::AtlTraceRedirectManager::Init()
 {
-
 	if (::AttachConsole(ATTACH_PARENT_PROCESS)) {
 		FILE* unused;
 		if (freopen_s(&unused, "CONOUT$", "w", stdout)) {

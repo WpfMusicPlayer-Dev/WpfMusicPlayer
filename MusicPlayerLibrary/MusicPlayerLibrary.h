@@ -242,6 +242,8 @@ namespace MusicPlayerLibrary {
 		bool is_av_filter_equalizer_initialized();
 		void reset_av_filter_equalizer();
 	public:
+		volatile bool suppress_time_events = false;
+
 		// constructor
 		MusicPlayerNative();
 		// no copy & move
@@ -255,6 +257,7 @@ namespace MusicPlayerLibrary {
 		bool IsPlaying();
 		void OpenFile(const CString& fileName, const CString& file_extension_in = CString());
 		float GetMusicTimeLength();
+		float GetCurrentMusicPosition();
 		CString GetSongTitle();
 		CString GetSongArtist();
 		void Start();
@@ -332,6 +335,7 @@ namespace MusicPlayerLibrary {
 		bool IsPlaying();
 		void OpenFile(const System::String^ fileName);
 		float GetMusicTimeLength();
+		float GetCurrentMusicPosition();
 		System::String^ GetSongTitle();
 		System::String^ GetSongArtist();
 		void Start();
