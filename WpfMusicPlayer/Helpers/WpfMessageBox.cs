@@ -28,14 +28,23 @@ public partial class WpfMessageBox : Window
             .FirstOrDefault(w => w.IsActive)
             ?? Application.Current.MainWindow;
 
-        var dlg = new WpfMessageBox();
-        dlg.TitleText.Text = title;
-        dlg.MessageText.Text = message;
+        var dlg = new WpfMessageBox
+        {
+            TitleText =
+            {
+                Text = title
+            },
+            MessageText =
+            {
+                Text = message
+            }
+        };
 
         if (icon != WpfMessageBoxIcon.None)
         {
             dlg.IconText.Visibility = Visibility.Visible;
 
+            // ReSharper disable once SwitchStatementHandlesSomeKnownEnumValuesWithDefault
             switch (icon)
             {
                 case WpfMessageBoxIcon.Information:
@@ -53,6 +62,8 @@ public partial class WpfMessageBox : Window
                     dlg.IconText.Foreground = new System.Windows.Media.SolidColorBrush(
                         System.Windows.Media.Color.FromRgb(0xFF, 0xB9, 0x00));
                     break;
+                default:
+                    throw new ArgumentOutOfRangeException(nameof(icon), icon, null);
             }
         }
 

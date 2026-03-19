@@ -1,7 +1,7 @@
 ﻿#include "pch.h"
+#include "AtlTraceRedirect.h"
 #include "LrcFileController.h"
 
-#include <bit>
 #include <msclr/marshal_cppstd.h>
 #include <vcclr.h>
 
@@ -443,7 +443,8 @@ void LrcFileControllerNative::parse_lrc_file_stream(CFile* file_stream)
         }
         else
         {
-            AfxMessageBox(_T("err: create lrc node failed, aborting!"), MB_ICONERROR);
+            // AfxMessageBox(_T("err: create lrc node failed, aborting!"), MB_ICONERROR);
+            throw gcnew System::InvalidOperationException("Create lrc node failed, aborting!");
         }
     };
 
@@ -458,6 +459,12 @@ void LrcFileControllerNative::parse_lrc_file_stream(CFile* file_stream)
         CString line = file_content_w.Mid(start, end - start).Trim();
         if (line.IsEmpty())
         {
+            start = end + 1;
+            continue;
+        }
+        if (line[0] == '{')
+        {
+            ATLTRACE(_T("warn: invalid ncm extension found, ignoring\n"));
             start = end + 1;
             continue;
         }
@@ -506,7 +513,7 @@ void LrcFileControllerNative::parse_lrc_file_stream(CFile* file_stream)
         // 解析时间tag
         if (line.GetLength() < 10)
         {
-            AfxMessageBox(_T("err: invalid lrc line, aborting!"), MB_ICONERROR);
+            // AfxMessageBox(_T("err: invalid lrc line, aborting!"), MB_ICONERROR);
             // clear stack
             while (!lyrics_in_ms.empty())
             {
@@ -514,19 +521,20 @@ void LrcFileControllerNative::parse_lrc_file_stream(CFile* file_stream)
                 lyrics_in_ms.pop();
             }
             clear_lrc_nodes();
-            return;
+            throw gcnew System::InvalidOperationException("Invalid lrc line, aborting!");
         }
         int time_tag_end_index = line.Find(']');
-        if (time_tag_end_index == -1 || line[0] != '[' || line[3] != ':' || line[6] != '.')
+        if (time_tag_end_index == -1 || line[0] != '[' || line[3] != ':' || 
+            (line[6] != '.' && line[6] != ':'))
         {
-            AfxMessageBox(_T("err: invalid lrc time tag, aborting!"), MB_ICONERROR);
+            // (_T("err: invalid lrc time tag, aborting!"), MB_ICONERROR);
             while (!lyrics_in_ms.empty())
             {
                 delete lyrics_in_ms.top();
                 lyrics_in_ms.pop();
             }
             clear_lrc_nodes();
-            return;
+            throw gcnew System::InvalidOperationException("Invalid lrc time tag, aborting!");
         }
         int minutes = _ttoi(line.Mid(1, 2));
         int seconds = _ttoi(line.Mid(4, 2));
@@ -542,14 +550,14 @@ void LrcFileControllerNative::parse_lrc_file_stream(CFile* file_stream)
             total_ms <=> recorded_ms))
         {
         case ThreeWayCompareResult::Less: // 歌词时间戳一定有序
-            AfxMessageBox(_T("err: invalid time stamp order!"), MB_ICONERROR);
+            // AfxMessageBox(_T("err: invalid time stamp order!"), MB_ICONERROR);
             while (!lyrics_in_ms.empty())
             {
                 delete lyrics_in_ms.top();
                 lyrics_in_ms.pop();
             }
             clear_lrc_nodes();
-            break;
+            throw gcnew System::InvalidOperationException("Invalid time stamp order!");
         case ThreeWayCompareResult::Greater:
             // 先处理之前的歌词
             if (total_ms < 0) total_ms = 0;

@@ -70,6 +70,8 @@ namespace WpfMusicPlayer
                 _isPortrait = shouldBePortrait;
                 LandscapeContent.Visibility = shouldBePortrait ? Visibility.Collapsed : Visibility.Visible;
                 PortraitContent.Visibility  = shouldBePortrait ? Visibility.Visible   : Visibility.Collapsed;
+                OpenButton.Visibility  = shouldBePortrait ? Visibility.Collapsed : Visibility.Visible;
+                VolumePanel.Visibility = shouldBePortrait ? Visibility.Collapsed : Visibility.Visible;
                 return;
             }
 
@@ -81,6 +83,9 @@ namespace WpfMusicPlayer
 
         private void AnimateLayoutSwitch(bool toPortrait)
         {
+            OpenButton.Visibility  = toPortrait ? Visibility.Collapsed : Visibility.Visible;
+            VolumePanel.Visibility = toPortrait ? Visibility.Collapsed : Visibility.Visible;
+
             var incoming = toPortrait ? PortraitContent : LandscapeContent;
             var outgoing = toPortrait ? LandscapeContent : PortraitContent;
 

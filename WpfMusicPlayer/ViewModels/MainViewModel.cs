@@ -4,6 +4,7 @@ using System.IO;
 using System.Windows;
 using System.Windows.Input;
 using System.Windows.Media.Imaging;
+using WpfMusicPlayer.Helpers;
 using WpfMusicPlayer.Services;
 
 namespace WpfMusicPlayer.ViewModels;
@@ -246,8 +247,8 @@ public class MainViewModel : ViewModelBase, IDisposable
         }
         catch (ArgumentException ex)
         {
-            Helpers.WpfMessageBox.Show($"{ex.Message}\n{path}", "Error",
-                Helpers.WpfMessageBoxIcon.Error);
+            WpfMessageBox.Show($"{ex.Message}\n{path}", "Error",
+                WpfMessageBoxIcon.Error);
         }
     }
 
@@ -287,18 +288,20 @@ public class MainViewModel : ViewModelBase, IDisposable
                 ParseAndAddLocalLyric(content);
                 return;
             }
-            catch
+            catch (InvalidOperationException ex)
             {
                 // ignored
+                WpfMessageBox.Show(ex.Message, "Error", WpfMessageBoxIcon.Error);
             }
         }
 
-        Lyrics.Add("No lyrics available");
+        Lyrics.Add("暂无歌词");
     }
 
     private void ParseAndAddLocalLyric(string content)
     {
         var lyricController = new LrcFileController();
+        
         lyricController.ParseLrcStream(content);
         if (!lyricController.Valid()) return;
         for (var i = 0; i < lyricController.GetLrcNodeCount(); ++i)
