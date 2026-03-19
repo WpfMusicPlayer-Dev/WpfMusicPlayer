@@ -246,7 +246,8 @@ public class MainViewModel : ViewModelBase, IDisposable
         }
         catch (ArgumentException ex)
         {
-            MessageBox.Show($"{ex.Message}\n{path}", "Error");
+            Helpers.WpfMessageBox.Show($"{ex.Message}\n{path}", "Error",
+                Helpers.WpfMessageBoxIcon.Error);
         }
     }
 
@@ -261,7 +262,7 @@ public class MainViewModel : ViewModelBase, IDisposable
             return;
         }
 
-        string? lrcPath = FindBestLrcFile();
+        var lrcPath = FindBestLrcFile();
         if (!string.IsNullOrEmpty(lrcPath))
         {
             try
@@ -286,7 +287,10 @@ public class MainViewModel : ViewModelBase, IDisposable
                 ParseAndAddLocalLyric(content);
                 return;
             }
-            catch { }
+            catch
+            {
+                // ignored
+            }
         }
 
         Lyrics.Add("No lyrics available");
@@ -317,16 +321,6 @@ public class MainViewModel : ViewModelBase, IDisposable
             Path.GetFullPath(Path.Combine(fileDir, "..")),
         };
 
-        void AddKnownPath(Environment.SpecialFolder folder)
-        {
-            var path = Environment.GetFolderPath(folder);
-            if (!string.IsNullOrEmpty(path))
-            {
-                searchPaths.Add(path);
-                searchPaths.Add(Path.Combine(path, "Lyrics"));
-            }
-        }
-
         AddKnownPath(Environment.SpecialFolder.MyMusic);
         AddKnownPath(Environment.SpecialFolder.MyDocuments);
 
@@ -336,15 +330,13 @@ public class MainViewModel : ViewModelBase, IDisposable
             targetName = Path.GetFileNameWithoutExtension(_currentFilePath);
         }
 
-        foreach (var dir in searchPaths)
+        foreach (var dir in searchPaths.Where(Directory.Exists))
         {
-            if (!Directory.Exists(dir)) continue;
-
             try
             {
                 var lrcFiles = Directory.GetFiles(dir, "*.lrc");
                 string? bestFile = null;
-                float bestSimilarity = 0f;
+                var bestSimilarity = 0f;
 
                 foreach (var file in lrcFiles)
                 {
@@ -355,12 +347,10 @@ public class MainViewModel : ViewModelBase, IDisposable
                         return file;
                     }
 
-                    float sim = CalculateJaccardSimilarity(fileName, targetName);
-                    if (sim > 0.7f && sim > bestSimilarity)
-                    {
-                        bestSimilarity = sim;
-                        bestFile = file;
-                    }
+                    var sim = CalculateJaccardSimilarity(fileName, targetName);
+                    if (!(sim > 0.7f) || !(sim > bestSimilarity)) continue;
+                    bestSimilarity = sim;
+                    bestFile = file;
                 }
 
                 if (bestFile != null) return bestFile;
@@ -369,6 +359,14 @@ public class MainViewModel : ViewModelBase, IDisposable
         }
 
         return null;
+
+        void AddKnownPath(Environment.SpecialFolder folder)
+        {
+            var path = Environment.GetFolderPath(folder);
+            if (string.IsNullOrEmpty(path)) return;
+            searchPaths.Add(path);
+            searchPaths.Add(Path.Combine(path, "Lyrics"));
+        }
     }
 
     private static float CalculateJaccardSimilarity(string str1, string str2)
@@ -404,7 +402,7 @@ public class MainViewModel : ViewModelBase, IDisposable
 
     private static string FormatTime(float seconds)
     {
-        TimeSpan timeSpan = TimeSpan.FromSeconds(seconds);
+        var timeSpan = TimeSpan.FromSeconds(seconds);
         return $"{(int)timeSpan.TotalMinutes}:{timeSpan.Seconds:D2}";
     }
 }
