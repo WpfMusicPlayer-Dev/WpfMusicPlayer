@@ -517,7 +517,6 @@ void LrcFileControllerNative::parse_lrc_file_stream(CFile* file_stream)
             // clear stack
             while (!lyrics_in_ms.empty())
             {
-                delete lyrics_in_ms.top();
                 lyrics_in_ms.pop();
             }
             clear_lrc_nodes();
@@ -530,7 +529,6 @@ void LrcFileControllerNative::parse_lrc_file_stream(CFile* file_stream)
             // (_T("err: invalid lrc time tag, aborting!"), MB_ICONERROR);
             while (!lyrics_in_ms.empty())
             {
-                delete lyrics_in_ms.top();
                 lyrics_in_ms.pop();
             }
             clear_lrc_nodes();
@@ -553,7 +551,6 @@ void LrcFileControllerNative::parse_lrc_file_stream(CFile* file_stream)
             // AfxMessageBox(_T("err: invalid time stamp order!"), MB_ICONERROR);
             while (!lyrics_in_ms.empty())
             {
-                delete lyrics_in_ms.top();
                 lyrics_in_ms.pop();
             }
             clear_lrc_nodes();
