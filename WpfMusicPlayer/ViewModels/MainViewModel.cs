@@ -151,6 +151,10 @@ public class MainViewModel : ViewModelBase, IDisposable
 
         await Task.Delay(200);
         IsDraggingSlider = false;
+        if (!isPlaying)
+        {
+            OnTimeChanged(targetTime);
+        }
     }
 
     public async void SeekToLyric(LyricLineViewModel lyric)
@@ -174,6 +178,10 @@ public class MainViewModel : ViewModelBase, IDisposable
 
         await Task.Delay(200);
         IsDraggingSlider = false;
+        if (!isPlaying)
+        {
+            OnTimeChanged(targetTimeSec);
+        }
     }
 
     public void OnWindowClosed()
@@ -281,7 +289,7 @@ public class MainViewModel : ViewModelBase, IDisposable
         IsTranslationVisible = !IsTranslationVisible;
     }
 
-    private void OnPlayPause()
+    private async void OnPlayPause()
     {
         if (!_musicPlayer.IsInitialized())
         {
@@ -297,7 +305,10 @@ public class MainViewModel : ViewModelBase, IDisposable
         else
         {
             _syncContext.Post(_ => PlayPauseContent = "\u23F8", null);
+            IsDraggingSlider = true;
             _musicPlayer.Start();
+            await Task.Delay(200);
+            IsDraggingSlider = false;
         }
     }
 
