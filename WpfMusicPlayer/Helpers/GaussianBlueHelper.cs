@@ -46,6 +46,37 @@ internal static class GaussianBlueHelper
     private const int ACCENT_ENABLE_BLURBEHIND = 3;
     private const int DWMWA_USE_IMMERSIVE_DARK_MODE = 20;
 
+    [DllImport("ntdll.dll")]
+    static extern int RtlGetVersion(ref OSVERSIONINFOEX versionInfo);
+
+    [StructLayout(LayoutKind.Sequential)]
+    public struct OSVERSIONINFOEX
+    {
+        public int dwOSVersionInfoSize;
+        public int dwMajorVersion;
+        public int dwMinorVersion;
+        public int dwBuildNumber;
+        public int dwPlatformId;
+        [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 128)]
+        public string szCSDVersion;
+    }
+
+    public static bool IsWindows11()
+    {
+        OSVERSIONINFOEX v = new OSVERSIONINFOEX();
+        v.dwOSVersionInfoSize = Marshal.SizeOf(v);
+        RtlGetVersion(ref v);
+        return v.dwMajorVersion == 10 && v.dwBuildNumber >= 22000;
+    }
+    public enum DwmSystemBackdropType
+    {
+        Auto = 0,
+        None = 1,
+        Mica = 2,
+        Acrylic = 3,
+        Tabbed = 4
+    }
+
     public static void EnableBlur(Window window, uint tintColor = 0xCC222222)
     {
         var hwndSource = (HwndSource?)PresentationSource.FromVisual(window);
@@ -64,32 +95,42 @@ internal static class GaussianBlueHelper
         var margins = new Margins { Left = -1, Right = -1, Top = -1, Bottom = -1 };
         DwmExtendFrameIntoClientArea(hwnd, ref margins);
 
-        // 应用高斯模糊
-        var accent = new AccentPolicy
+        if (IsWindows11())
         {
-            AccentState = ACCENT_ENABLE_BLURBEHIND,
-            AccentFlags = 2,
-            GradientColor = tintColor
-        };
-
-        var accentSize = Marshal.SizeOf<AccentPolicy>();
-        var accentPtr = Marshal.AllocHGlobal(accentSize);
-        try
+            // Windows 11: Apply Acrylic (Mica doesn't work at all)
+            const int DWMWA_SYSTEMBACKDROP_TYPE = 38;
+            int backdrop = (int)DwmSystemBackdropType.Acrylic;
+            DwmSetWindowAttribute(hwnd, DWMWA_SYSTEMBACKDROP_TYPE, ref backdrop, sizeof(int));
+        } else
         {
-            Marshal.StructureToPtr(accent, accentPtr, false);
-
-            var data = new WindowCompositionAttributeData
+            // Windows 10: Apply Gaussian Blur
+            // (Acrylic doesn't work on my Win10 PC)
+            var accent = new AccentPolicy
             {
-                Attribute = WCA_ACCENT_POLICY,
-                Data = accentPtr,
-                SizeOfData = accentSize
+                AccentState = ACCENT_ENABLE_BLURBEHIND,
+                AccentFlags = 2,
+                GradientColor = tintColor
             };
 
-            SetWindowCompositionAttribute(hwnd, ref data);
-        }
-        finally
-        {
-            Marshal.FreeHGlobal(accentPtr);
+            var accentSize = Marshal.SizeOf<AccentPolicy>();
+            var accentPtr = Marshal.AllocHGlobal(accentSize);
+            try
+            {
+                Marshal.StructureToPtr(accent, accentPtr, false);
+
+                var data = new WindowCompositionAttributeData
+                {
+                    Attribute = WCA_ACCENT_POLICY,
+                    Data = accentPtr,
+                    SizeOfData = accentSize
+                };
+
+                SetWindowCompositionAttribute(hwnd, ref data);
+            }
+            finally
+            {
+                Marshal.FreeHGlobal(accentPtr);
+            }
         }
     }
 }
