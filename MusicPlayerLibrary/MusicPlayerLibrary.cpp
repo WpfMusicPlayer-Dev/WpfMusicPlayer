@@ -1890,7 +1890,7 @@ MusicPlayerLibrary::MusicPlayerNative::~MusicPlayerNative()
 		delete audio_fifo_section;
 	}
 
-	if (out_buffer)					delete out_buffer;
+	if (out_buffer)					delete[] out_buffer;
 
 	if (frame_ready_event)			CloseHandle(frame_ready_event);
 	if (frame_underrun_event)		CloseHandle(frame_underrun_event);
