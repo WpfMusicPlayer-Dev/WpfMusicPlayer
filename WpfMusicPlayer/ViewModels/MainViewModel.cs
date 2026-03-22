@@ -117,6 +117,8 @@ public class MainViewModel : ViewModelBase, IDisposable
         private set => SetProperty(ref field, value);
     }
 
+    public bool IsFileDialogOpen { get; set; }
+
     public ICommand PlayPauseCommand { get; }
     public ICommand OpenCommand { get; }
     public ICommand PrevCommand { get; }
@@ -139,14 +141,14 @@ public class MainViewModel : ViewModelBase, IDisposable
         var timeInSec = _musicPlayer.GetMusicTimeLength();
         var targetTime = timeInSec * (float)ProgressValue / (float)ProgressMaximum;
         var isPlaying = _musicPlayer.IsPlaying();
-        
+
         IsDraggingSlider = true;
 
-        await Task.Run(() => 
+        await Task.Run(() =>
         {
             _musicPlayer.SeekToPosition(targetTime, true);
         });
-        
+
         if (isPlaying)
         {
             _musicPlayer.Start();
@@ -235,7 +237,7 @@ public class MainViewModel : ViewModelBase, IDisposable
 
             SongTitle = _musicPlayer.GetSongTitle() ?? "Unknown Title";
             ArtistName = _musicPlayer.GetSongArtist() ?? "Unknown Artist";
-            
+
             // 坑：UpdateMetadata会清除缩略图，对非NCM文件，FileInit总是晚于AlbumArtInit，导致设置的缩略图被清空
             _smtcService.UpdateTextMetadata(SongTitle, ArtistName);
             _smtcService.UpdateTimeline(TimeSpan.Zero, TimeSpan.FromSeconds(length));
@@ -253,7 +255,7 @@ public class MainViewModel : ViewModelBase, IDisposable
             try
             {
                 AlbumCoverImage = image != null ? ConvertDrawingImageToWpfImage(image) : null;
-            
+
                 Stream? stream = null;
                 if (image != null)
                 {
@@ -277,7 +279,7 @@ public class MainViewModel : ViewModelBase, IDisposable
         _syncContext.Post(_ =>
         {
             if (IsDraggingSlider) return;
-            
+
             ProgressValue = time;
             CurrentTime = FormatTime(time);
             if (_lrcFileController == null) return;
@@ -305,7 +307,7 @@ public class MainViewModel : ViewModelBase, IDisposable
 
     private void OnStart()
     {
-        _syncContext.Post(_ => 
+        _syncContext.Post(_ =>
         {
             PlayPauseContent = "\u23F8";
             _smtcService.UpdatePlaybackStatus(PlaybackState.Playing);
@@ -315,7 +317,7 @@ public class MainViewModel : ViewModelBase, IDisposable
 
     private void OnPause()
     {
-        _syncContext.Post(_ => 
+        _syncContext.Post(_ =>
         {
             PlayPauseContent = "\u25B6";
             _smtcService.UpdatePlaybackStatus(PlaybackState.Paused);
@@ -332,7 +334,7 @@ public class MainViewModel : ViewModelBase, IDisposable
             CurrentTime = "0:00";
             _smtcService.UpdatePlaybackStatus(PlaybackState.Stopped);
             _smtcService.UpdateTimeline(TimeSpan.Zero, TimeSpan.FromSeconds(ProgressMaximum));
-            
+
             if (CurrentLyricIndex < 0 || CurrentLyricIndex >= Lyrics.Count) return;
             Lyrics[CurrentLyricIndex].IsHighlighted = false;
             Lyrics[CurrentLyricIndex].Progress = 0;
@@ -358,7 +360,7 @@ public class MainViewModel : ViewModelBase, IDisposable
             _syncContext.Post(_ => PlayPauseContent = "\u25B6", null);
             return;
         }
-        
+
         if (_musicPlayer.IsPlaying())
         {
             _musicPlayer.Pause();
@@ -374,7 +376,11 @@ public class MainViewModel : ViewModelBase, IDisposable
 
     private async Task OnOpenAsync()
     {
+        if (IsFileDialogOpen == true) { return; }
+        IsFileDialogOpen = true;
         var path = await _fileDialogService.PickMusicFileAsync();
+
+        IsFileDialogOpen = false;
         if (path == null) return;
 
         try
@@ -455,8 +461,8 @@ public class MainViewModel : ViewModelBase, IDisposable
     private void ParseAndAddLocalLyric(string content)
     {
         _lrcFileController?.Dispose();
-        _lrcFileController  = new LrcFileController();
-        
+        _lrcFileController = new LrcFileController();
+
         _lrcFileController.ParseLrcStream(content);
         _lrcFileController.SetSongDuration(_musicPlayer.GetMusicTimeLength());
         if (!_lrcFileController.Valid()) return;
