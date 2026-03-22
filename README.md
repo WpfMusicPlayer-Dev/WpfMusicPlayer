@@ -18,11 +18,11 @@ Current implemented features:
 - Portrait mode 
 - NCM file decrypt & play
 - Windows System Media Transport Controls (SMTC) support
+- 10-band equalizer support
 
 Still work in progress. 3rd party libraries are managed by vcpkg.
 
 TODO List:
-- [ ] Equalizer support (UI, Native Supported)
 - [ ] Playlist support (UI)
 - [ ] UI Refractor (UI, from @Baicaiye)
 - [ ] Playing times record & display (UI, From @AAA大葱批发)
