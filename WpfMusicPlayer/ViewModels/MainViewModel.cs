@@ -1,6 +1,7 @@
 using MusicPlayerLibrary;
 using System.Collections.ObjectModel;
 using System.IO;
+using System.Runtime;
 using System.Windows;
 using System.Windows.Input;
 using System.Windows.Media.Imaging;
@@ -18,6 +19,7 @@ public class MainViewModel : ViewModelBase, IDisposable
     private string? _currentFilePath;
     private LrcFileController? _lrcFileController;
     private int _sampleRate;
+    private GCLatencyMode _previousLatencyMode;
 
     public MainViewModel(IFileDialogService fileDialogService, ISmtcService smtcService)
     {
@@ -209,6 +211,7 @@ public class MainViewModel : ViewModelBase, IDisposable
 
     public void Dispose()
     {
+        GCSettings.LatencyMode = _previousLatencyMode;
         _musicPlayer.Dispose();
         GC.SuppressFinalize(this);
     }
@@ -331,6 +334,8 @@ public class MainViewModel : ViewModelBase, IDisposable
 
     private void OnStart()
     {
+        _previousLatencyMode = GCSettings.LatencyMode;
+        GCSettings.LatencyMode = GCLatencyMode.SustainedLowLatency;
         _syncContext.Post(_ =>
         {
             PlayPauseContent = "\u23F8";
@@ -341,6 +346,7 @@ public class MainViewModel : ViewModelBase, IDisposable
 
     private void OnPause()
     {
+        GCSettings.LatencyMode = _previousLatencyMode;
         _syncContext.Post(_ =>
         {
             PlayPauseContent = "\u25B6";
@@ -351,6 +357,7 @@ public class MainViewModel : ViewModelBase, IDisposable
 
     private void OnStop()
     {
+        GCSettings.LatencyMode = _previousLatencyMode;
         _syncContext.Post(_ =>
         {
             PlayPauseContent = "\u25B6";
