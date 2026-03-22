@@ -165,7 +165,6 @@ namespace WpfMusicPlayer
                 _isPortrait = shouldBePortrait;
                 LandscapeContent.Visibility = shouldBePortrait ? Visibility.Collapsed : Visibility.Visible;
                 PortraitContent.Visibility  = shouldBePortrait ? Visibility.Visible   : Visibility.Collapsed;
-                OpenButton.Visibility  = shouldBePortrait ? Visibility.Collapsed : Visibility.Visible;
                 VolumePanel.Visibility = shouldBePortrait ? Visibility.Collapsed : Visibility.Visible;
                 return;
             }
@@ -181,7 +180,6 @@ namespace WpfMusicPlayer
         private bool _isAnimationPlaying; 
         private async void AnimateLayoutSwitch(bool toPortrait)
         {
-            OpenButton.Visibility  = toPortrait ? Visibility.Collapsed : Visibility.Visible;
             VolumePanel.Visibility = toPortrait ? Visibility.Collapsed : Visibility.Visible;
 
             var incoming = toPortrait ? PortraitContent : LandscapeContent;
@@ -189,8 +187,6 @@ namespace WpfMusicPlayer
 
             var outAlbum = toPortrait ? (FrameworkElement)LandscapeAlbumCover : PortraitAlbumCover;
             var inAlbum  = toPortrait ? (FrameworkElement)PortraitAlbumCover  : LandscapeAlbumCover;
-            var outSong  = toPortrait ? (FrameworkElement)LandscapeSongInfo   : PortraitSongInfo;
-            var inSong   = toPortrait ? (FrameworkElement)PortraitSongInfo    : LandscapeSongInfo;
 
             var inAlbumTranslate  = toPortrait ? PortraitAlbumTranslate      : LandscapeAlbumTranslate;
             var inAlbumScale      = toPortrait ? PortraitAlbumScale          : LandscapeAlbumScale;
@@ -200,7 +196,6 @@ namespace WpfMusicPlayer
             ClearLayoutAnimations();
 
             var outAlbumPos = outAlbum.TranslatePoint(new Point(0, 0), ContentArea);
-            var outSongPos  = outSong.TranslatePoint(new Point(0, 0), ContentArea);
             var outAlbumW = outAlbum.ActualWidth;
 
             incoming.Visibility = Visibility.Visible;
@@ -208,13 +203,10 @@ namespace WpfMusicPlayer
             incoming.UpdateLayout();
 
             var inAlbumPos = inAlbum.TranslatePoint(new Point(0, 0), ContentArea);
-            var inSongPos  = inSong.TranslatePoint(new Point(0, 0), ContentArea);
             var inAlbumW = inAlbum.ActualWidth;
 
             var albumDx = outAlbumPos.X - inAlbumPos.X;
             var albumDy = outAlbumPos.Y - inAlbumPos.Y;
-            var songDx  = outSongPos.X  - inSongPos.X;
-            var songDy  = outSongPos.Y  - inSongPos.Y;
             var albumScaleRatio = inAlbumW > 0 ? outAlbumW / inAlbumW : 1;
 
             double lyricsDx = toPortrait ? 120 : -120;
@@ -223,9 +215,22 @@ namespace WpfMusicPlayer
             inAlbumTranslate.Y = albumDy;
             inAlbumScale.ScaleX = albumScaleRatio;
             inAlbumScale.ScaleY = albumScaleRatio;
-            inSongTranslate.X = songDx;
-            inSongTranslate.Y = songDy;
             inLyricsTranslate.X = lyricsDx;
+            
+            // 修改：LandscapeSongInfo移动至窗口底部，改为平滑淡出+淡入，而不是在页面上运动
+            if (toPortrait)
+            {
+                LandscapeSongInfo.Visibility = Visibility.Collapsed;
+                PortraitSongInfoTranslate.X = 0;
+                PortraitSongInfoTranslate.Y = 15;
+            }
+            else
+            {
+                LandscapeSongInfo.Opacity = 0;
+                LandscapeSongInfo.Visibility = Visibility.Visible;
+                LandscapeSongInfoTranslate.X = -20;
+                LandscapeSongInfoTranslate.Y = 0;
+            }
 
             var duration = new Duration(TimeSpan.FromMilliseconds(420));
             var easing = new CubicEase { EasingMode = EasingMode.EaseInOut };
@@ -234,6 +239,23 @@ namespace WpfMusicPlayer
             AnimateScale(inAlbumScale, 1, 1, duration, easing);
             AnimateTranslate(inSongTranslate, 0, 0, duration, easing);
             AnimateTranslate(inLyricsTranslate, 0, 0, duration, easing);
+
+            // Fade LandscapeSongInfo separately since it's in the bottom bar, not
+            // part of the incoming/outgoing content areas.
+            if (!toPortrait)
+            {
+                var songFadeIn = new DoubleAnimation(1, new Duration(TimeSpan.FromMilliseconds(300)))
+                {
+                    EasingFunction = easing,
+                    BeginTime = TimeSpan.FromMilliseconds(80)
+                };
+                songFadeIn.Completed += (_, _) =>
+                {
+                    LandscapeSongInfo.BeginAnimation(OpacityProperty, null);
+                    LandscapeSongInfo.Opacity = 1;
+                };
+                LandscapeSongInfo.BeginAnimation(OpacityProperty, songFadeIn);
+            }
 
             var fadeIn = new DoubleAnimation(1, new Duration(TimeSpan.FromMilliseconds(320)))
             {
@@ -278,6 +300,8 @@ namespace WpfMusicPlayer
             LandscapeContent.Opacity = 1;
             PortraitContent.BeginAnimation(OpacityProperty, null);
             PortraitContent.Opacity = 1;
+            LandscapeSongInfo.BeginAnimation(OpacityProperty, null);
+            LandscapeSongInfo.Opacity = 1;
 
             ClearTransformAnimations(LandscapeAlbumTranslate, LandscapeAlbumScale);
             ClearTransformAnimations(LandscapeSongInfoTranslate, null);

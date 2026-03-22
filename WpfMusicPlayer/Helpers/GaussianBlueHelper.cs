@@ -94,7 +94,8 @@ internal static class GaussianBlueHelper
         // 去除标题栏
         var margins = new Margins { Left = -1, Right = -1, Top = -1, Bottom = -1 };
         DwmExtendFrameIntoClientArea(hwnd, ref margins);
-
+        bool enableAcrylic = false;
+        if (!enableAcrylic) return; 
         if (IsWindows11())
         {
             // Windows 11: Apply Acrylic (Mica doesn't work at all)

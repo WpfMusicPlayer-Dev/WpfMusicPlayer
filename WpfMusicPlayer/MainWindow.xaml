@@ -273,6 +273,26 @@
     </Window.Resources>
 
     <Grid>
+        <Border VerticalAlignment="Center"
+                Width="{Binding ActualWidth, RelativeSource={RelativeSource AncestorType=Window}}"
+                Height="{Binding ActualHeight, RelativeSource={RelativeSource AncestorType=Window}}"
+                IsHitTestVisible="False"
+                Panel.ZIndex="-1" ClipToBounds="True">
+            <Border.OpacityMask>
+                <LinearGradientBrush StartPoint="0,0" EndPoint="0,1">
+                    <GradientStop Color="Transparent" Offset="0.0"/>
+                    <GradientStop Color="#99FFFFFF" Offset="0.5"/>
+                    <GradientStop Color="#CCFFFFFF" Offset="1.0"/>
+                </LinearGradientBrush>
+            </Border.OpacityMask>
+            <Image Source="{Binding AlbumCoverImage}" Stretch="UniformToFill" Opacity="0.8"
+                   Margin="-100" VerticalAlignment="Center" HorizontalAlignment="Center">
+                <Image.Effect>
+                    <BlurEffect Radius="80" KernelType="Gaussian"/>
+                </Image.Effect>
+            </Image>
+        </Border>
+
         <Button
             Content="☰"
                 WindowChrome.IsHitTestVisibleInChrome="True"
@@ -333,17 +353,6 @@
                             <Image Stretch="UniformToFill" Source="{Binding AlbumCoverImage}"/>
                         </Grid>
                     </Border>
-                    <StackPanel x:Name="LandscapeSongInfo">
-                        <StackPanel.RenderTransform>
-                            <TranslateTransform x:Name="LandscapeSongInfoTranslate"/>
-                        </StackPanel.RenderTransform>
-                        <Viewbox StretchDirection="DownOnly" MaxHeight="32" Margin="0,0,0,10">
-                            <TextBlock Text="{Binding SongTitle}" Foreground="White" FontSize="24" FontWeight="Bold" TextWrapping="NoWrap"/>
-                        </Viewbox>
-                        <Viewbox StretchDirection="DownOnly" MaxHeight="22">
-                            <TextBlock Text="{Binding ArtistName}" Foreground="#BBBBBB" FontSize="16" TextWrapping="NoWrap"/>
-                        </Viewbox>
-                    </StackPanel>
                 </StackPanel>
 
                 <ScrollViewer Grid.Column="1" HorizontalScrollBarVisibility="Disabled"
@@ -445,7 +454,17 @@
                             <ColumnDefinition Width="1*"/>
                         </Grid.ColumnDefinitions>
 
-                        <Button x:Name="OpenButton" Grid.Column="0" Command="{Binding OpenCommand}" Content="&#x1F4C2; Open" HorizontalAlignment="Left" VerticalAlignment="Center" FontSize="16" Foreground="White" Background="#444444" Padding="15,8" BorderThickness="0" Cursor="Hand" Margin="10,0,0,0"/>
+                        <StackPanel x:Name="LandscapeSongInfo" Grid.Column="0" VerticalAlignment="Center" HorizontalAlignment="Left" Margin="10,0,0,0">
+                            <StackPanel.RenderTransform>
+                                <TranslateTransform x:Name="LandscapeSongInfoTranslate"/>
+                            </StackPanel.RenderTransform>
+                            <Viewbox StretchDirection="DownOnly" MaxHeight="24" HorizontalAlignment="Left" Margin="0,0,0,2">
+                                <TextBlock Text="{Binding SongTitle}" Foreground="White" FontSize="18" FontWeight="Bold" TextWrapping="NoWrap"/>
+                            </Viewbox>
+                            <Viewbox StretchDirection="DownOnly" MaxHeight="18" HorizontalAlignment="Left">
+                                <TextBlock Text="{Binding ArtistName}" Foreground="#BBBBBB" FontSize="14" TextWrapping="NoWrap"/>
+                            </Viewbox>
+                        </StackPanel>
 
                         <StackPanel Grid.Column="1" Orientation="Horizontal" HorizontalAlignment="Center" VerticalAlignment="Center">
                             <Button Command="{Binding PlayModeCommand}" Content="🔀" FontSize="24" Margin="10,0" Width="50" Height="50" Background="Transparent" Foreground="White" BorderThickness="0">
@@ -582,7 +601,7 @@
                                         <Style.Triggers>
                                             <DataTrigger Binding="{Binding IsTranslationVisible}" Value="True">
                                                 <Setter Property="Background" Value="#330078D7"/>
-                                                <Setter Property="Foreground" Value="#0078D7"/>
+                                                <Setter Property="Foreground" Value="#FFFFFF"/>
                                             </DataTrigger>
                                         </Style.Triggers>
                                     </Style>

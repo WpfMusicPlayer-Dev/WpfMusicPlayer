@@ -364,4 +364,6 @@ FodyWeavers.xsd
 
 # vcpkg installed Packages
 vcpkg_installed/
-/.idea/.idea.WpfMusicPlayer/.idea
+
+# Jetbrains Rider settings
+.idea/
