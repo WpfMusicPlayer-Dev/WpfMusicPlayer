@@ -19,6 +19,7 @@ namespace WpfMusicPlayer
     {
         private MainViewModel ViewModel => (MainViewModel)DataContext;
         private bool _isSidebarOpen;
+        private bool _isEqualizerOpen;
 
         public MainWindow()
         {
@@ -410,10 +411,52 @@ namespace WpfMusicPlayer
                 case 1: // Playlist
                     // TODO: implement playlist view
                     break;
-                case 2: // Settings
+                case 2: // Equalizer
+                    OpenEqualizer();
+                    break;
+                case 3: // Settings
                     // TODO: implement settings view
                     break;
             }
+        }
+
+        private void EqualizerBackdrop_MouseLeftButtonDown(object sender, MouseButtonEventArgs e)
+        {
+            CloseEqualizer();
+        }
+
+        private void OpenEqualizer()
+        {
+            _isEqualizerOpen = true;
+            EqualizerOverlay.Visibility = Visibility.Visible;
+
+            var duration = new Duration(TimeSpan.FromMilliseconds(250));
+            var easing = new CubicEase { EasingMode = EasingMode.EaseOut };
+
+            var slideIn = new DoubleAnimation(0, duration) { EasingFunction = easing };
+            EqualizerTranslate.BeginAnimation(TranslateTransform.XProperty, slideIn);
+
+            var fadeIn = new DoubleAnimation(1, duration) { EasingFunction = easing };
+            EqualizerBackdrop.BeginAnimation(OpacityProperty, fadeIn);
+        }
+
+        private void CloseEqualizer()
+        {
+            _isEqualizerOpen = false;
+
+            var duration = new Duration(TimeSpan.FromMilliseconds(200));
+            var easing = new CubicEase { EasingMode = EasingMode.EaseIn };
+
+            var slideOut = new DoubleAnimation(320, duration) { EasingFunction = easing };
+            EqualizerTranslate.BeginAnimation(TranslateTransform.XProperty, slideOut);
+
+            var fadeOut = new DoubleAnimation(0, duration) { EasingFunction = easing };
+            fadeOut.Completed += (_, _) =>
+            {
+                if (!_isEqualizerOpen)
+                    EqualizerOverlay.Visibility = Visibility.Collapsed;
+            };
+            EqualizerBackdrop.BeginAnimation(OpacityProperty, fadeOut);
         }
 
         private void SidebarMenuBottom_SelectionChanged(object sender, SelectionChangedEventArgs e)

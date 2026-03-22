@@ -77,7 +77,7 @@ internal static class GaussianBlueHelper
         Tabbed = 4
     }
 
-    public static void EnableBlur(Window window, uint tintColor = 0xCC222222)
+    public static void EnableBlur(Window window, bool enableAcrylic = false, uint tintColor = 0xCC222222)
     {
         var hwndSource = (HwndSource?)PresentationSource.FromVisual(window);
         if (hwndSource?.CompositionTarget == null)
@@ -94,7 +94,6 @@ internal static class GaussianBlueHelper
         // 去除标题栏
         var margins = new Margins { Left = -1, Right = -1, Top = -1, Bottom = -1 };
         DwmExtendFrameIntoClientArea(hwnd, ref margins);
-        bool enableAcrylic = false;
         if (!enableAcrylic) return; 
         if (IsWindows11())
         {

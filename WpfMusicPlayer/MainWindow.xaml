@@ -5,6 +5,7 @@
         xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
         xmlns:vm="clr-namespace:WpfMusicPlayer.ViewModels"
         xmlns:helpers="clr-namespace:WpfMusicPlayer.Helpers"
+        xmlns:views="clr-namespace:WpfMusicPlayer.Views"
         mc:Ignorable="d"
         d:DataContext="{d:DesignInstance Type=vm:MainViewModel}"
         Title="WpfMusicPlayer" Height="600" Width="800"
@@ -618,6 +619,21 @@
             </Border>
         </Grid>
 
+        <Grid x:Name="EqualizerOverlay" Visibility="Collapsed" Panel.ZIndex="150">
+            <Border x:Name="EqualizerBackdrop" Background="#80000000" Opacity="0"
+                    MouseLeftButtonDown="EqualizerBackdrop_MouseLeftButtonDown"/>
+            <Border HorizontalAlignment="Right" Width="320"
+                    Background="#E6202020" BorderBrush="#40FFFFFF" BorderThickness="1,0,0,0">
+                <Border.RenderTransform>
+                    <TranslateTransform x:Name="EqualizerTranslate" X="320"/>
+                </Border.RenderTransform>
+                <Border.Effect>
+                    <DropShadowEffect BlurRadius="20" ShadowDepth="-4" Direction="180" Color="Black" Opacity="0.5"/>
+                </Border.Effect>
+                <views:EqualizerView DataContext="{Binding Equalizer}"/>
+            </Border>
+        </Grid>
+
         <Grid x:Name="SidebarOverlay" Visibility="Collapsed" Panel.ZIndex="200">
             <Border x:Name="SidebarBackdrop" Background="#80000000" Opacity="0"
                     MouseLeftButtonDown="SidebarBackdrop_MouseLeftButtonDown"/>
@@ -667,6 +683,13 @@
                                 <TextBlock Text="&#xE8FD;" FontFamily="Segoe MDL2 Assets" FontSize="16"
                                            VerticalAlignment="Center" Margin="0,0,14,0" Foreground="White"/>
                                 <TextBlock Text="播放列表" VerticalAlignment="Center" Foreground="White"/>
+                            </StackPanel>
+                        </ListBoxItem>
+                        <ListBoxItem>
+                            <StackPanel Orientation="Horizontal">
+                                <TextBlock Text="&#xE9E9;" FontFamily="Segoe MDL2 Assets" FontSize="16"
+                                           VerticalAlignment="Center" Margin="0,0,14,0" Foreground="White"/>
+                                <TextBlock Text="均衡器" VerticalAlignment="Center" Foreground="White"/>
                             </StackPanel>
                         </ListBoxItem>
                         <ListBoxItem>

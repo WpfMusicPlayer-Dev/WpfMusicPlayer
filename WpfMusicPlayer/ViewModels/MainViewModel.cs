@@ -24,6 +24,7 @@ public class MainViewModel : ViewModelBase, IDisposable
         _smtcService = smtcService;
         _syncContext = SynchronizationContext.Current!;
         _musicPlayer = new MusicPlayer();
+        Equalizer = new EqualizerViewModel(ApplyEqualizerBand);
         SubscribePlayerEvents();
         SubscribeSmtcEvents();
 
@@ -35,17 +36,24 @@ public class MainViewModel : ViewModelBase, IDisposable
         TranslateCommand = new RelayCommand(OnToggleTranslation, () => HasTranslationAvailable);
     }
 
+    public EqualizerViewModel Equalizer { get; }
+
+    private void ApplyEqualizerBand(int index, int value)
+    {
+        _musicPlayer.SetEqualizerBand(index, value);
+    }
+
     public string SongTitle
     {
         get;
         private set => SetProperty(ref field, value);
-    } = "Song Title";
+    } = "Unknown Title";
 
     public string ArtistName
     {
         get;
         private set => SetProperty(ref field, value);
-    } = "Artist Name";
+    } = "Unknown Artist";
 
     public BitmapImage? AlbumCoverImage
     {
@@ -63,7 +71,7 @@ public class MainViewModel : ViewModelBase, IDisposable
     {
         get;
         private set => SetProperty(ref field, value);
-    } = "3:30";
+    } = "0:00";
 
     public double ProgressValue
     {
