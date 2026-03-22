@@ -45,7 +45,8 @@ namespace WpfMusicPlayer
         {
             var index = ViewModel.CurrentLyricIndex;
             if (index < 0) return;
-            if (e.PropertyName == nameof(MainViewModel.IsTranslationVisible))
+            if (e.PropertyName is nameof(MainViewModel.IsTranslationVisible)
+                                 or nameof(MainViewModel.IsRomanjiVisible))
             {
                 Dispatcher.BeginInvoke(delegate
                 {

@@ -37,7 +37,9 @@ public class MainViewModel : ViewModelBase, IDisposable
         PrevCommand = new RelayCommand(() => { });
         NextCommand = new RelayCommand(() => { });
         PlayModeCommand = new RelayCommand(() => { });
+        PlaylistCommand = new RelayCommand(() => { });
         TranslateCommand = new RelayCommand(OnToggleTranslation, () => HasTranslationAvailable);
+        RomanjiCommand = new RelayCommand(OnToggleRomanji, () => HasRomanjiAvailable);
     }
 
     public EqualizerViewModel Equalizer { get; }
@@ -129,6 +131,18 @@ public class MainViewModel : ViewModelBase, IDisposable
         private set => SetProperty(ref field, value);
     }
 
+    public bool IsRomanjiVisible
+    {
+        get;
+        private set => SetProperty(ref field, value);
+    } = true;
+
+    public bool HasRomanjiAvailable
+    {
+        get;
+        private set => SetProperty(ref field, value);
+    }
+
     public bool IsFileDialogOpen { get; set; }
 
     public ICommand PlayPauseCommand { get; }
@@ -137,6 +151,8 @@ public class MainViewModel : ViewModelBase, IDisposable
     public ICommand NextCommand { get; }
     public ICommand PlayModeCommand { get; }
     public ICommand TranslateCommand { get; }
+    public ICommand RomanjiCommand { get; }
+    public ICommand PlaylistCommand { get; }
 
     public void OpenFile(string filePath)
     {
@@ -384,6 +400,11 @@ public class MainViewModel : ViewModelBase, IDisposable
         IsTranslationVisible = !IsTranslationVisible;
     }
 
+    private void OnToggleRomanji()
+    {
+        IsRomanjiVisible = !IsRomanjiVisible;
+    }
+
     private async void OnPlayPause()
     {
         if (!_musicPlayer.IsInitialized())
@@ -437,6 +458,7 @@ public class MainViewModel : ViewModelBase, IDisposable
             Lyrics.Clear();
             CurrentLyricIndex = -1;
             HasTranslationAvailable = false;
+            HasRomanjiAvailable = false;
         }
     }
 
@@ -446,6 +468,7 @@ public class MainViewModel : ViewModelBase, IDisposable
         Lyrics.Clear();
         CurrentLyricIndex = -1;
         HasTranslationAvailable = false;
+        HasRomanjiAvailable = false;
 
         if (!string.IsNullOrEmpty(lyricsStr))
         {
@@ -464,7 +487,7 @@ public class MainViewModel : ViewModelBase, IDisposable
             }
             catch (Exception ex)
             {
-                System.Diagnostics.Debug.WriteLine($"Failed to load lrc: {ex.Message}");
+                WpfMessageBox.Show($"Failed to load lrc: {ex.Message}", "Error", WpfMessageBoxIcon.Error);
             }
         }
 
@@ -500,6 +523,8 @@ public class MainViewModel : ViewModelBase, IDisposable
 
         var hasTranslation = _lrcFileController.IsAuxiliaryInfoEnabled(LrcAuxiliaryInfo.Translation);
         HasTranslationAvailable = hasTranslation;
+        var hasRomanji = _lrcFileController.IsAuxiliaryInfoEnabled(LrcAuxiliaryInfo.Romanization);
+        HasRomanjiAvailable = hasRomanji;
 
         for (var i = 0; i < _lrcFileController.GetLrcNodeCount(); ++i)
         {
@@ -508,14 +533,21 @@ public class MainViewModel : ViewModelBase, IDisposable
             var lyricText = _lrcFileController.GetLrcLineAt(i, lyricIndex);
 
             string? translation = null;
+            string? romanji = null;
             if (hasTranslation)
             {
                 var transIndex = _lrcFileController.GetLrcLineAuxIndex(i, LrcAuxiliaryInfo.Translation);
                 if (transIndex >= 0)
                     translation = _lrcFileController.GetLrcLineAt(i, transIndex);
             }
+            if (hasRomanji)
+            {
+                var romanjiIndex = _lrcFileController.GetLrcLineAuxIndex(i, LrcAuxiliaryInfo.Romanization);
+                if (romanjiIndex >= 0)
+                    romanji = _lrcFileController.GetLrcLineAt(i, romanjiIndex);
+            }
 
-            Lyrics.Add(new LyricLineViewModel(lyricText, timeMs, translation)
+            Lyrics.Add(new LyricLineViewModel(lyricText, timeMs, translation, romanji)
             {
                 IsProgressEnabled = _lrcFileController.IsPercentageEnabled(i)
             });

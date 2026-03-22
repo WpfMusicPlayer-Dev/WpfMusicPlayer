@@ -269,6 +269,51 @@
                         </Style>
                     </TextBlock.Style>
                 </TextBlock>
+                <TextBlock Text="{Binding Romanji}" TextAlignment="Center" TextWrapping="Wrap" Margin="0,2,0,0">
+                    <TextBlock.Style>
+                        <Style TargetType="TextBlock">
+                            <Setter Property="Foreground" Value="#66DDDDDD"/>
+                            <Setter Property="FontSize" Value="13"/>
+                            <Setter Property="Visibility" Value="Collapsed"/>
+                            <Style.Triggers>
+                                <MultiDataTrigger>
+                                    <MultiDataTrigger.Conditions>
+                                        <Condition Binding="{Binding HasRomanji}" Value="True"/>
+                                        <Condition Binding="{Binding DataContext.IsRomanjiVisible, RelativeSource={RelativeSource AncestorType=Window}}" Value="True"/>
+                                    </MultiDataTrigger.Conditions>
+                                    <Setter Property="Visibility" Value="Visible"/>
+                                </MultiDataTrigger>
+                                <DataTrigger Binding="{Binding IsHighlighted}" Value="True">
+                                    <Setter Property="Foreground" Value="#BBDDDDDD"/>
+                                    <DataTrigger.EnterActions>
+                                        <BeginStoryboard>
+                                            <Storyboard>
+                                                <DoubleAnimation Storyboard.TargetProperty="FontSize"
+                                                 To="15" Duration="0:0:0.25">
+                                                    <DoubleAnimation.EasingFunction>
+                                                        <CubicEase EasingMode="EaseOut"/>
+                                                    </DoubleAnimation.EasingFunction>
+                                                </DoubleAnimation>
+                                            </Storyboard>
+                                        </BeginStoryboard>
+                                    </DataTrigger.EnterActions>
+                                    <DataTrigger.ExitActions>
+                                        <BeginStoryboard>
+                                            <Storyboard>
+                                                <DoubleAnimation Storyboard.TargetProperty="FontSize"
+                                                 To="13" Duration="0:0:0.25">
+                                                    <DoubleAnimation.EasingFunction>
+                                                        <CubicEase EasingMode="EaseOut"/>
+                                                    </DoubleAnimation.EasingFunction>
+                                                </DoubleAnimation>
+                                            </Storyboard>
+                                        </BeginStoryboard>
+                                    </DataTrigger.ExitActions>
+                                </DataTrigger>
+                            </Style.Triggers>
+                        </Style>
+                    </TextBlock.Style>
+                </TextBlock>
             </StackPanel>
         </DataTemplate>
     </Window.Resources>
@@ -356,20 +401,107 @@
                     </Border>
                 </StackPanel>
 
-                <ScrollViewer Grid.Column="1" HorizontalScrollBarVisibility="Disabled"
-                              VerticalScrollBarVisibility="Auto" Margin="20,0,0,0"
-                              Style="{StaticResource LyricsScrollViewerStyle}">
-                    <ScrollViewer.RenderTransform>
-                        <TranslateTransform x:Name="LandscapeLyricsTranslate"/>
-                    </ScrollViewer.RenderTransform>
-                    <ListBox x:Name="LandscapeLyricsList" ItemsSource="{Binding Lyrics}" Background="Transparent" BorderThickness="0"
-                            HorizontalContentAlignment="Stretch" ScrollViewer.HorizontalScrollBarVisibility="Disabled"
-                            ScrollViewer.VerticalScrollBarVisibility="Disabled"
-                            PreviewMouseLeftButtonUp="LyricsList_PreviewMouseLeftButtonUp"
-                            PreviewMouseWheel="LyricsList_PreviewMouseWheel"
-                            ItemTemplate="{StaticResource LyricItemTemplate}">
-                    </ListBox>
-                </ScrollViewer>
+                <Grid Grid.Column="1" Margin="20,0,0,0">
+                    <ScrollViewer HorizontalScrollBarVisibility="Disabled"
+                                  VerticalScrollBarVisibility="Auto"
+                                  Style="{StaticResource LyricsScrollViewerStyle}">
+                        <ScrollViewer.RenderTransform>
+                            <TranslateTransform x:Name="LandscapeLyricsTranslate"/>
+                        </ScrollViewer.RenderTransform>
+                        <ListBox x:Name="LandscapeLyricsList" ItemsSource="{Binding Lyrics}" Background="Transparent" BorderThickness="0"
+                                HorizontalContentAlignment="Stretch" ScrollViewer.HorizontalScrollBarVisibility="Disabled"
+                                ScrollViewer.VerticalScrollBarVisibility="Disabled"
+                                PreviewMouseLeftButtonUp="LyricsList_PreviewMouseLeftButtonUp"
+                                PreviewMouseWheel="LyricsList_PreviewMouseWheel"
+                                ItemTemplate="{StaticResource LyricItemTemplate}">
+                        </ListBox>
+                    </ScrollViewer>
+                    
+                    <StackPanel Orientation="Horizontal"
+                                VerticalAlignment="Bottom" HorizontalAlignment="Right"
+                                Margin="0,0,12,12">
+                        <Button Command="{Binding TranslateCommand}"
+                                Width="40" Height="40" BorderThickness="0" Margin="0,0,6,0">
+                            <Button.Style>
+                                <Style TargetType="Button">
+                                    <Setter Property="Foreground" Value="White"/>
+                                    <Setter Property="Background" Value="#66333333"/>
+                                    <Setter Property="Template">
+                                        <Setter.Value>
+                                            <ControlTemplate TargetType="Button">
+                                                <Border x:Name="Bg" Background="{TemplateBinding Background}" CornerRadius="5">
+                                                    <TextBlock x:Name="BtnText" Text="译" FontSize="18" Foreground="{TemplateBinding Foreground}"
+                                                               HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                                                </Border>
+                                                <ControlTemplate.Triggers>
+                                                    <Trigger Property="IsMouseOver" Value="True">
+                                                        <Setter TargetName="Bg" Property="Background" Value="#88333333"/>
+                                                    </Trigger>
+                                                    <Trigger Property="IsPressed" Value="True">
+                                                        <Setter TargetName="Bg" Property="Background" Value="#AA333333"/>
+                                                    </Trigger>
+                                                    <Trigger Property="IsEnabled" Value="False">
+                                                        <Setter TargetName="BtnText" Property="Foreground" Value="#40FFFFFF"/>
+                                                        <Setter TargetName="Bg" Property="Opacity" Value="0.5"/>
+                                                    </Trigger>
+                                                </ControlTemplate.Triggers>
+                                            </ControlTemplate>
+                                        </Setter.Value>
+                                    </Setter>
+                                    <Style.Triggers>
+                                        <DataTrigger Binding="{Binding HasTranslationAvailable}" Value="False">
+                                            <Setter Property="Visibility" Value="Collapsed"/>
+                                        </DataTrigger>
+                                        <DataTrigger Binding="{Binding IsTranslationVisible}" Value="True">
+                                            <Setter Property="Background" Value="#990078D7"/>
+                                            <Setter Property="Foreground" Value="#FFFFFF"/>
+                                        </DataTrigger>
+                                    </Style.Triggers>
+                                </Style>
+                            </Button.Style>
+                        </Button>
+                        <Button Command="{Binding RomanjiCommand}"
+                                Width="40" Height="40" BorderThickness="0">
+                            <Button.Style>
+                                <Style TargetType="Button">
+                                    <Setter Property="Foreground" Value="White"/>
+                                    <Setter Property="Background" Value="#66333333"/>
+                                    <Setter Property="Template">
+                                        <Setter.Value>
+                                            <ControlTemplate TargetType="Button">
+                                                <Border x:Name="Bg" Background="{TemplateBinding Background}" CornerRadius="5">
+                                                    <TextBlock x:Name="BtnText" Text="あ" FontSize="18" Foreground="{TemplateBinding Foreground}"
+                                                               HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                                                </Border>
+                                                <ControlTemplate.Triggers>
+                                                    <Trigger Property="IsMouseOver" Value="True">
+                                                        <Setter TargetName="Bg" Property="Background" Value="#88333333"/>
+                                                    </Trigger>
+                                                    <Trigger Property="IsPressed" Value="True">
+                                                        <Setter TargetName="Bg" Property="Background" Value="#AA333333"/>
+                                                    </Trigger>
+                                                    <Trigger Property="IsEnabled" Value="False">
+                                                        <Setter TargetName="BtnText" Property="Foreground" Value="#40FFFFFF"/>
+                                                        <Setter TargetName="Bg" Property="Opacity" Value="0.5"/>
+                                                    </Trigger>
+                                                </ControlTemplate.Triggers>
+                                            </ControlTemplate>
+                                        </Setter.Value>
+                                    </Setter>
+                                    <Style.Triggers>
+                                        <DataTrigger Binding="{Binding HasRomanjiAvailable}" Value="False">
+                                            <Setter Property="Visibility" Value="Collapsed"/>
+                                        </DataTrigger>
+                                        <DataTrigger Binding="{Binding IsRomanjiVisible}" Value="True">
+                                            <Setter Property="Background" Value="#990078D7"/>
+                                            <Setter Property="Foreground" Value="#FFFFFF"/>
+                                        </DataTrigger>
+                                    </Style.Triggers>
+                                </Style>
+                            </Button.Style>
+                        </Button>
+                    </StackPanel>
+                </Grid>
             </Grid>
 
             <Grid x:Name="PortraitContent" Grid.Row="0" Margin="20" Visibility="Collapsed">
@@ -378,21 +510,108 @@
                     <RowDefinition Height="Auto"/>
                 </Grid.RowDefinitions>
 
-                <ScrollViewer Grid.Row="0" HorizontalScrollBarVisibility="Disabled"
-                              VerticalScrollBarVisibility="Auto"
-                              Style="{StaticResource LyricsScrollViewerStyle}">
-                    <ScrollViewer.RenderTransform>
-                        <TranslateTransform x:Name="PortraitLyricsTranslate"/>
-                    </ScrollViewer.RenderTransform>
-                    <ListBox x:Name="PortraitLyricsList" ItemsSource="{Binding Lyrics}" Background="Transparent" BorderThickness="0"
-                             HorizontalContentAlignment="Stretch"
-                             HorizontalAlignment="Stretch" ScrollViewer.HorizontalScrollBarVisibility="Disabled"
-                             ScrollViewer.VerticalScrollBarVisibility="Disabled"
-                             PreviewMouseLeftButtonUp="LyricsList_PreviewMouseLeftButtonUp"
-                             PreviewMouseWheel="LyricsList_PreviewMouseWheel"
-                             ItemTemplate="{StaticResource LyricItemTemplate}">
-                    </ListBox>
-                </ScrollViewer>
+                <Grid Grid.Row="0">
+                    <ScrollViewer HorizontalScrollBarVisibility="Disabled"
+                                  VerticalScrollBarVisibility="Auto"
+                                  Style="{StaticResource LyricsScrollViewerStyle}">
+                        <ScrollViewer.RenderTransform>
+                            <TranslateTransform x:Name="PortraitLyricsTranslate"/>
+                        </ScrollViewer.RenderTransform>
+                        <ListBox x:Name="PortraitLyricsList" ItemsSource="{Binding Lyrics}" Background="Transparent" BorderThickness="0"
+                                 HorizontalContentAlignment="Stretch"
+                                 HorizontalAlignment="Stretch" ScrollViewer.HorizontalScrollBarVisibility="Disabled"
+                                 ScrollViewer.VerticalScrollBarVisibility="Disabled"
+                                 PreviewMouseLeftButtonUp="LyricsList_PreviewMouseLeftButtonUp"
+                                 PreviewMouseWheel="LyricsList_PreviewMouseWheel"
+                                 ItemTemplate="{StaticResource LyricItemTemplate}">
+                        </ListBox>
+                    </ScrollViewer>
+
+                    <StackPanel Orientation="Vertical"
+                                VerticalAlignment="Bottom" HorizontalAlignment="Right"
+                                Margin="0,0,12,12">
+                        <Button Command="{Binding TranslateCommand}"
+                                Width="40" Height="40" BorderThickness="0" Margin="0,0,0,6">
+                            <Button.Style>
+                                <Style TargetType="Button">
+                                    <Setter Property="Foreground" Value="White"/>
+                                    <Setter Property="Background" Value="#66333333"/>
+                                    <Setter Property="Template">
+                                        <Setter.Value>
+                                            <ControlTemplate TargetType="Button">
+                                                <Border x:Name="Bg" Background="{TemplateBinding Background}" CornerRadius="5">
+                                                    <TextBlock x:Name="BtnText" Text="译" FontSize="18" Foreground="{TemplateBinding Foreground}"
+                                                               HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                                                </Border>
+                                                <ControlTemplate.Triggers>
+                                                    <Trigger Property="IsMouseOver" Value="True">
+                                                        <Setter TargetName="Bg" Property="Background" Value="#88333333"/>
+                                                    </Trigger>
+                                                    <Trigger Property="IsPressed" Value="True">
+                                                        <Setter TargetName="Bg" Property="Background" Value="#AA333333"/>
+                                                    </Trigger>
+                                                    <Trigger Property="IsEnabled" Value="False">
+                                                        <Setter TargetName="BtnText" Property="Foreground" Value="#40FFFFFF"/>
+                                                        <Setter TargetName="Bg" Property="Opacity" Value="0.5"/>
+                                                    </Trigger>
+                                                </ControlTemplate.Triggers>
+                                            </ControlTemplate>
+                                        </Setter.Value>
+                                    </Setter>
+                                    <Style.Triggers>
+                                        <DataTrigger Binding="{Binding HasTranslationAvailable}" Value="False">
+                                            <Setter Property="Visibility" Value="Collapsed"/>
+                                        </DataTrigger>
+                                        <DataTrigger Binding="{Binding IsTranslationVisible}" Value="True">
+                                            <Setter Property="Background" Value="#990078D7"/>
+                                            <Setter Property="Foreground" Value="#FFFFFF"/>
+                                        </DataTrigger>
+                                    </Style.Triggers>
+                                </Style>
+                            </Button.Style>
+                        </Button>
+                        <Button Command="{Binding RomanjiCommand}"
+                                Width="40" Height="40" BorderThickness="0">
+                            <Button.Style>
+                                <Style TargetType="Button">
+                                    <Setter Property="Foreground" Value="White"/>
+                                    <Setter Property="Background" Value="#66333333"/>
+                                    <Setter Property="Template">
+                                        <Setter.Value>
+                                            <ControlTemplate TargetType="Button">
+                                                <Border x:Name="Bg" Background="{TemplateBinding Background}" CornerRadius="5">
+                                                    <TextBlock x:Name="BtnText" Text="あ" FontSize="18" Foreground="{TemplateBinding Foreground}"
+                                                               HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                                                </Border>
+                                                <ControlTemplate.Triggers>
+                                                    <Trigger Property="IsMouseOver" Value="True">
+                                                        <Setter TargetName="Bg" Property="Background" Value="#88333333"/>
+                                                    </Trigger>
+                                                    <Trigger Property="IsPressed" Value="True">
+                                                        <Setter TargetName="Bg" Property="Background" Value="#AA333333"/>
+                                                    </Trigger>
+                                                    <Trigger Property="IsEnabled" Value="False">
+                                                        <Setter TargetName="BtnText" Property="Foreground" Value="#40FFFFFF"/>
+                                                        <Setter TargetName="Bg" Property="Opacity" Value="0.5"/>
+                                                    </Trigger>
+                                                </ControlTemplate.Triggers>
+                                            </ControlTemplate>
+                                        </Setter.Value>
+                                    </Setter>
+                                    <Style.Triggers>
+                                        <DataTrigger Binding="{Binding HasRomanjiAvailable}" Value="False">
+                                            <Setter Property="Visibility" Value="Collapsed"/>
+                                        </DataTrigger>
+                                        <DataTrigger Binding="{Binding IsRomanjiVisible}" Value="True">
+                                            <Setter Property="Background" Value="#990078D7"/>
+                                            <Setter Property="Foreground" Value="#FFFFFF"/>
+                                        </DataTrigger>
+                                    </Style.Triggers>
+                                </Style>
+                            </Button.Style>
+                        </Button>
+                    </StackPanel>
+                </Grid>
 
                 <Grid Grid.Row="1" Margin="0,15,0,0" HorizontalAlignment="Left">
                     <Grid.ColumnDefinitions>
@@ -572,17 +791,17 @@
                                     </Style>
                                 </Button.Style>
                             </Button>
-                            <Button Command="{Binding TranslateCommand}" FontSize="24" Margin="10,0" Width="50" Height="50" BorderThickness="0">
+                            <Button Command="{Binding PlaylistCommand}" Content="&#x23ED;" FontSize="24" Margin="10,0" Width="50" Height="50" Background="Transparent" Foreground="White" BorderThickness="0">
                                 <Button.Style>
                                     <Style TargetType="Button">
                                         <Setter Property="Foreground" Value="White"/>
                                         <Setter Property="Background" Value="Transparent"/>
                                         <Setter Property="Template">
                                             <Setter.Value>
-                                                    <ControlTemplate TargetType="Button">
+                                                <ControlTemplate TargetType="Button">
                                                     <Border x:Name="Bg" Background="{TemplateBinding Background}" CornerRadius="6">
-                                                        <TextBlock x:Name="BtnText" Text="译" FontSize="24" Foreground="{TemplateBinding Foreground}"
-                                                                   HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                                                        <TextBlock Text="&#x1F4C3;" FontSize="24" Foreground="{TemplateBinding Foreground}"
+                                                               HorizontalAlignment="Center" VerticalAlignment="Center"/>
                                                     </Border>
                                                     <ControlTemplate.Triggers>
                                                         <Trigger Property="IsMouseOver" Value="True">
@@ -591,20 +810,10 @@
                                                         <Trigger Property="IsPressed" Value="True">
                                                             <Setter TargetName="Bg" Property="Background" Value="#30FFFFFF"/>
                                                         </Trigger>
-                                                        <Trigger Property="IsEnabled" Value="False">
-                                                            <Setter TargetName="BtnText" Property="Foreground" Value="#40FFFFFF"/>
-                                                            <Setter TargetName="Bg" Property="Opacity" Value="0.5"/>
-                                                        </Trigger>
                                                     </ControlTemplate.Triggers>
                                                 </ControlTemplate>
                                             </Setter.Value>
                                         </Setter>
-                                        <Style.Triggers>
-                                            <DataTrigger Binding="{Binding IsTranslationVisible}" Value="True">
-                                                <Setter Property="Background" Value="#330078D7"/>
-                                                <Setter Property="Foreground" Value="#FFFFFF"/>
-                                            </DataTrigger>
-                                        </Style.Triggers>
                                     </Style>
                                 </Button.Style>
                             </Button>
@@ -612,7 +821,7 @@
 
                         <StackPanel x:Name="VolumePanel" Grid.Column="2" Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Center">
                             <TextBlock Text="&#x1F50A;" FontSize="20" Foreground="White" VerticalAlignment="Center" Margin="0,0,10,0"/>
-                            <Slider Width="100" Minimum="0" Maximum="1" Value="{Binding Volume, Mode=TwoWay}" VerticalAlignment="Center"/>
+                            <Slider Width="100" Minimum="0" Maximum="1" SmallChange="0.01" LargeChange="0.1" TickFrequency="0.01" Value="{Binding Volume, Mode=TwoWay}" VerticalAlignment="Center"/>
                         </StackPanel>
                     </Grid>
                 </Grid>

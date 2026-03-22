@@ -19,6 +19,7 @@ Current implemented features:
 - NCM file decrypt & play
 - Windows System Media Transport Controls (SMTC) support
 - 10-band equalizer support
+- JPN Romanji support
 
 Still work in progress. 3rd party libraries are managed by vcpkg.
 
@@ -26,7 +27,6 @@ TODO List:
 - [ ] Playlist support (UI)
 - [ ] UI Refractor (UI, from @Baicaiye)
 - [ ] Playing times record & display (UI, From @AAA大葱批发)
-- [ ] JPN Romanji support (UI, Native Supported, from @酪无止境)
 - You can submit your ideas in issues, or contact me directly by email.
 
 Author info:

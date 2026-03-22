@@ -1,6 +1,6 @@
 ﻿namespace WpfMusicPlayer.ViewModels;
 
-public class LyricLineViewModel(string text, int timeMs = -1, string? translation = null) : ViewModelBase
+public class LyricLineViewModel(string text, int timeMs = -1, string? translation = null, string? romanji = null) : ViewModelBase
 {
     public string Text { get; } = text;
 
@@ -8,7 +8,11 @@ public class LyricLineViewModel(string text, int timeMs = -1, string? translatio
 
     public string? Translation { get; } = translation;
 
+    public string? Romanji { get; } = romanji;
+
     public bool HasTranslation => Translation != null;
+
+    public bool HasRomanji => Romanji != null;
 
     public bool IsHighlighted
     {

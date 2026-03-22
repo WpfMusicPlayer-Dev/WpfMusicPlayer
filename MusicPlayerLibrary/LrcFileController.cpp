@@ -7,6 +7,88 @@
 
 using namespace MusicPlayerLibrary;
 
+bool IsRomajiSyllableToken(const CStringA& token)
+{
+    static const std::initializer_list<CStringA> romaji_tokens = {
+        "a", "i", "u", "e", "o",
+        "ka", "ki", "ku", "ke", "ko", "ga", "gi", "gu", "ge", "go",
+        "sa", "shi", "su", "se", "so", "za", "ji", "zu", "ze", "zo",
+        "ta", "chi", "tsu", "te", "to", "da", "de", "do",
+        "na", "ni", "nu", "ne", "no",
+        "ha", "hi", "fu", "he", "ho", "ba", "bi", "bu", "be", "bo", "pa", "pi", "pu", "pe", "po",
+        "ma", "mi", "mu", "me", "mo",
+        "ya", "yu", "yo",
+        "ra", "ri", "ru", "re", "ro",
+        "wa", "wo", "n",
+        "kya", "kyu", "kyo", "gya", "gyu", "gyo",
+        "sha", "shu", "sho", "ja", "ju", "jo",
+        "cha", "chu", "cho",
+        "nya", "nyu", "nyo", "hya", "hyu", "hyo",
+        "bya", "byu", "byo", "pya", "pyu", "pyo",
+        "mya", "myu", "myo", "rya", "ryu", "ryo"
+    };
+
+    for (const auto& romaji_token : romaji_tokens)
+    {
+        if (token == romaji_token)
+        {
+            return true;
+        }
+    }
+    return false;
+}
+
+bool IsStrongSeparatedRomaji(const CString& input)
+{
+    CString lower = input;
+    lower.MakeLower();
+    CStringA text{ CT2A(lower) };
+    CStringA token;
+    int token_count = 0;
+    bool has_separator = false;
+
+    auto flush_token = [&token, &token_count]()
+    {
+        if (token.IsEmpty())
+        {
+            return true;
+        }
+
+        ++token_count;
+        const bool is_valid = IsRomajiSyllableToken(token);
+        token.Empty();
+        return is_valid;
+    };
+
+    for (int i = 0; i < text.GetLength(); ++i)
+    {
+        const unsigned char c = static_cast<unsigned char>(text[i]);
+        if (isspace(c) || c == '-' || c == '\'')
+        {
+            has_separator = true;
+            if (!flush_token())
+            {
+                return false;
+            }
+            continue;
+        }
+
+        if (!isalpha(c))
+        {
+            return false;
+        }
+
+        token.AppendChar(static_cast<char>(c));
+    }
+
+    if (!flush_token())
+    {
+        return false;
+    }
+
+    return has_separator && token_count >= 2;
+}
+
 CSimpleArray<CString> SplitLrcForProgressMultiNode2(const CSimpleArray<CString>& texts)
 {
     CSimpleArray<CString> strs;
@@ -104,15 +186,24 @@ LrcMultiNode::LrcMultiNode(int t, const CSimpleArray<CString>& texts) :
     if (eng_index != -1)
     {
         float eng_prob, romaji_prob;
+        const bool has_jp_or_kr_lyric = jp_index != -1 || kr_index != -1;
+        const bool has_zh_only_pair = jp_index == -1 && kr_index == -1 && zh_index != -1;
+        const bool is_strong_separated_romaji = has_zh_only_pair && IsStrongSeparatedRomaji(texts[eng_index]);
         LrcLanguageHelper::detect_eng_vs_jpn_romaji_prob(texts[eng_index], &eng_prob, &romaji_prob);
         if (eng_prob > romaji_prob)
         {
             aux_infos[eng_index] = LrcAuxiliaryInfoNative::Lyric;
         }
-        else if (eng_prob < romaji_prob && (jp_index != -1 || kr_index != -1))
+        else if (eng_prob < romaji_prob && (has_jp_or_kr_lyric || is_strong_separated_romaji))
         {
 //            ATLTRACE(_T("info: romanization hit, line %s\n"), texts[eng_index].GetString());
             aux_infos[eng_index] = LrcAuxiliaryInfoNative::Romanization;
+            if (is_strong_separated_romaji)
+            {
+                // 坑：英语实际为罗马音，中文应为歌词正文而非翻译
+                // 注意此处要检查是否为强分隔罗马音，避免长得像英语的被一棒子打死
+                aux_infos[zh_index] = LrcAuxiliaryInfoNative::Lyric;
+            }
         }
         else if (jp_index != -1 && kr_index != -1)
         {
