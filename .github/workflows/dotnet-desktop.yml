@@ -49,11 +49,9 @@ jobs:
           .\vcpkg integrate install      
           
       - name: Install vcpkg packages
-        run: >
+        run: |
           cd ${{ github.workspace }}/vcpkg
-          .\vcpkg install    
-          --triplet x64-windows
-          --x-install-root=${{ github.workspace }}/vcpkg_installed
+          .\vcpkg install --triplet x64-windows --x-install-root=${{ github.workspace }}/vcpkg_installed
 
       - name: Restore NuGet packages
         run: >
