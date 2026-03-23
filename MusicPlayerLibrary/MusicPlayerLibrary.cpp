@@ -880,15 +880,18 @@ void MusicPlayerLibrary::MusicPlayerNative::audio_playback_worker_thread()
 		{
 			CriticalSectionLock fifo_lock(audio_fifo_section);
 			// read_samples_from_fifo((uint8_t**)out_buffer, xaudio2_play_frame_size);
+			// 注意：自定义采样率后，可能会出现FIFO采样率与XAudio2采样率不同的问题，会导致缓冲区被丢弃直到异常停止
+			int fifo_read_size = av_rescale_rnd(xaudio2_play_frame_size, 
+				codec_context->sample_rate, sample_rate, AV_ROUND_DOWN);
 			fifo_buf = (uint8_t**)av_calloc(decoder_audio_channels, sizeof(uint8_t*));
-			if (int alloc_ret = av_samples_alloc(fifo_buf, nullptr, decoder_audio_channels, xaudio2_play_frame_size, decoder_audio_sample_fmt, 0);
+			if (int alloc_ret = av_samples_alloc(fifo_buf, nullptr, decoder_audio_channels, fifo_read_size, decoder_audio_sample_fmt, 0);
 				alloc_ret < 0) {
 				FFMPEG_CRITICAL_ERROR(alloc_ret);
 				// remove duplicate check.
 				InterlockedExchange(playback_state, audio_playback_state_stopped);
 				break;
 			}
-			read_bytes = read_samples_from_fifo(fifo_buf, xaudio2_play_frame_size);
+			read_bytes = read_samples_from_fifo(fifo_buf, fifo_read_size);
 			if (read_bytes < 0) {
 				ATLTRACE("err: read samples from fifo failed, code=%d\n", read_bytes);
 				ATLTRACE("err: fifo size=%d", get_audio_fifo_cached_samples_size());
