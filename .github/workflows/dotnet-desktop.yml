@@ -50,7 +50,8 @@ jobs:
           
       - name: Install vcpkg packages
         run: >
-          $env:VCPKG_ROOT/vcpkg install
+          cd ${{ github.workspace }}/vcpkg
+          .\vcpkg install    
           --triplet x64-windows
           --x-install-root=${{ github.workspace }}/vcpkg_installed
 
