@@ -3,6 +3,7 @@ using System.Runtime.CompilerServices;
 
 namespace WpfMusicPlayer.ViewModels;
 
+// 参考了MVVM Light Toolkit的ViewModelBase实现，做了一些简化
 public abstract class ViewModelBase : INotifyPropertyChanged
 {
     public event PropertyChangedEventHandler? PropertyChanged;

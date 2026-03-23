@@ -85,26 +85,26 @@ internal static class GaussianBlueHelper
 
         var hwnd = hwndSource.Handle;
 
-        // 深色模式
+        // 启用深色模式
+        // 该API在Windows 10 2004+测试通过，Windows 11官方支持
         int darkMode = 1;
         DwmSetWindowAttribute(hwnd, DWMWA_USE_IMMERSIVE_DARK_MODE, ref darkMode, sizeof(int));
 
         hwndSource.CompositionTarget.BackgroundColor = Colors.Transparent;
 
-        // 去除标题栏
+        // 去除标题栏（扩展客户端区域到整个窗口）
         var margins = new Margins { Left = -1, Right = -1, Top = -1, Bottom = -1 };
         DwmExtendFrameIntoClientArea(hwnd, ref margins);
         if (!enableAcrylic) return; 
         if (IsWindows11())
         {
-            // Windows 11: Apply Acrylic (Mica doesn't work at all)
+            // Win11的云母效果好像也不是很好，所以启用Acrylic
             const int DWMWA_SYSTEMBACKDROP_TYPE = 38;
             int backdrop = (int)DwmSystemBackdropType.Acrylic;
             DwmSetWindowAttribute(hwnd, DWMWA_SYSTEMBACKDROP_TYPE, ref backdrop, sizeof(int));
         } else
         {
-            // Windows 10: Apply Gaussian Blur
-            // (Acrylic doesn't work on my Win10 PC)
+            // 回落至高斯模糊，Windows 10似乎对Acrylic支持不好。
             var accent = new AccentPolicy
             {
                 AccentState = ACCENT_ENABLE_BLURBEHIND,

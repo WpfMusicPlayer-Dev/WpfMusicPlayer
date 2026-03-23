@@ -2,6 +2,8 @@ using System.Windows.Input;
 
 namespace WpfMusicPlayer.ViewModels;
 
+// 抄的MSDN
+// https://learn.microsoft.com/en-us/dotnet/desktop/wpf/advanced/commanding-overview?view=netdesktop-7.0#relaycommand
 public class RelayCommand : ICommand
 {
     private readonly Action<object?> _execute;

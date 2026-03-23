@@ -24,7 +24,6 @@
     <Window.Resources>
         <helpers:KaraokeClipConverter x:Key="KaraokeClipConverter"/>
 
-        <!-- Dark-theme scrollbar for lyrics area -->
         <Style x:Key="LyricsScrollBarThumb" TargetType="Thumb">
             <Setter Property="OverridesDefaultStyle" Value="True"/>
             <Setter Property="IsTabStop" Value="False"/>
@@ -115,57 +114,75 @@
 
         <DataTemplate x:Key="LyricItemTemplate" DataType="{x:Type vm:LyricLineViewModel}">
             <StackPanel Margin="0,8">
-                <Grid>
+                <Grid ClipToBounds="True">
+                <helpers:MarqueeContainer IsUnbounded="{Binding IsProgressEnabled}">
+                <Grid helpers:MarqueeBehavior.IsActive="{Binding IsHighlighted}"
+                      helpers:MarqueeBehavior.Progress="{Binding Progress}"
+                      helpers:MarqueeBehavior.IsProgressDriven="{Binding IsProgressEnabled}">
+                    <Grid.Style>
+                        <Style TargetType="Grid">
+                            <Style.Triggers>
+                                <DataTrigger Binding="{Binding IsProgressEnabled}" Value="True">
+                                    <Setter Property="HorizontalAlignment" Value="Center"/>
+                                </DataTrigger>
+                            </Style.Triggers>
+                        </Style>
+                    </Grid.Style>
                     <!-- Base lyric text -->
-                    <TextBlock Text="{Binding Text}" TextAlignment="Center" TextWrapping="Wrap">
-                        <TextBlock.Style>
-                            <Style TargetType="TextBlock">
-                                <Setter Property="Foreground" Value="#88DDDDDD"/>
-                                <Setter Property="FontSize" Value="16"/>
-                                <Setter Property="FontWeight" Value="Normal"/>
-                                <Style.Triggers>
-                                    <DataTrigger Binding="{Binding IsHighlighted}" Value="True">
-                                        <Setter Property="Foreground" Value="White"/>
-                                        <Setter Property="FontWeight" Value="Bold"/>
-                                        <DataTrigger.EnterActions>
-                                            <BeginStoryboard>
-                                                <Storyboard>
-                                                    <DoubleAnimation Storyboard.TargetProperty="FontSize"
+                            <TextBlock Text="{Binding Text}">
+                                <TextBlock.Style>
+                                    <Style TargetType="TextBlock">
+                                        <Setter Property="TextWrapping" Value="Wrap"/>
+                                        <Setter Property="TextAlignment" Value="Center"/>
+                                        <Setter Property="Foreground" Value="#88DDDDDD"/>
+                                        <Setter Property="FontSize" Value="16"/>
+                                        <Setter Property="FontWeight" Value="Normal"/>
+                                        <Style.Triggers>
+                                            <DataTrigger Binding="{Binding IsProgressEnabled}" Value="True">
+                                                <Setter Property="TextWrapping" Value="NoWrap"/>
+                                            </DataTrigger>
+                                            <DataTrigger Binding="{Binding IsHighlighted}" Value="True">
+                                                <Setter Property="Foreground" Value="White"/>
+                                                <Setter Property="FontWeight" Value="Bold"/>
+                                                <DataTrigger.EnterActions>
+                                                    <BeginStoryboard>
+                                                        <Storyboard>
+                                                            <DoubleAnimation Storyboard.TargetProperty="FontSize"
                                                                      To="22" Duration="0:0:0.25">
-                                                        <DoubleAnimation.EasingFunction>
-                                                            <CubicEase EasingMode="EaseOut"/>
-                                                        </DoubleAnimation.EasingFunction>
-                                                    </DoubleAnimation>
-                                                </Storyboard>
-                                            </BeginStoryboard>
-                                        </DataTrigger.EnterActions>
-                                        <DataTrigger.ExitActions>
-                                            <BeginStoryboard>
-                                                <Storyboard>
-                                                    <DoubleAnimation Storyboard.TargetProperty="FontSize"
+                                                                <DoubleAnimation.EasingFunction>
+                                                                    <CubicEase EasingMode="EaseOut"/>
+                                                                </DoubleAnimation.EasingFunction>
+                                                            </DoubleAnimation>
+                                                        </Storyboard>
+                                                    </BeginStoryboard>
+                                                </DataTrigger.EnterActions>
+                                                <DataTrigger.ExitActions>
+                                                    <BeginStoryboard>
+                                                        <Storyboard>
+                                                            <DoubleAnimation Storyboard.TargetProperty="FontSize"
                                                                      To="16" Duration="0:0:0.25">
-                                                        <DoubleAnimation.EasingFunction>
-                                                            <CubicEase EasingMode="EaseOut"/>
-                                                        </DoubleAnimation.EasingFunction>
-                                                    </DoubleAnimation>
-                                                </Storyboard>
-                                            </BeginStoryboard>
-                                        </DataTrigger.ExitActions>
-                                    </DataTrigger>
-                                    <!-- When karaoke is active, dim the base so the white overlay stands out -->
-                                    <MultiDataTrigger>
-                                        <MultiDataTrigger.Conditions>
-                                            <Condition Binding="{Binding IsHighlighted}" Value="True"/>
-                                            <Condition Binding="{Binding IsProgressEnabled}" Value="True"/>
-                                        </MultiDataTrigger.Conditions>
-                                        <Setter Property="Foreground" Value="#AADDDDDD"/>
-                                    </MultiDataTrigger>
-                                </Style.Triggers>
-                            </Style>
-                        </TextBlock.Style>
-                    </TextBlock>
-                    <!-- Karaoke white overlay – clipped to the played portion (sub-character precision) -->
-                    <TextBlock Text="{Binding Text}" TextAlignment="Center" TextWrapping="Wrap"
+                                                                <DoubleAnimation.EasingFunction>
+                                                                    <CubicEase EasingMode="EaseOut"/>
+                                                                </DoubleAnimation.EasingFunction>
+                                                            </DoubleAnimation>
+                                                        </Storyboard>
+                                                    </BeginStoryboard>
+                                                </DataTrigger.ExitActions>
+                                            </DataTrigger>
+                                            <!-- When karaoke is active, dim the base so the white overlay stands out -->
+                                            <MultiDataTrigger>
+                                                <MultiDataTrigger.Conditions>
+                                                    <Condition Binding="{Binding IsHighlighted}" Value="True"/>
+                                                    <Condition Binding="{Binding IsProgressEnabled}" Value="True"/>
+                                                </MultiDataTrigger.Conditions>
+                                                <Setter Property="Foreground" Value="#AADDDDDD"/>
+                                            </MultiDataTrigger>
+                                        </Style.Triggers>
+                                    </Style>
+                                </TextBlock.Style>
+                            </TextBlock>
+                            <!-- 卡拉ok显示 （现在歌词横向滚动，所以只用做简单裁剪，无需逐字高亮，优化性能）-->
+                            <TextBlock Text="{Binding Text}" TextWrapping="NoWrap"
                                Foreground="White" IsHitTestVisible="False">
                         <TextBlock.Style>
                             <Style TargetType="TextBlock">
@@ -183,11 +200,7 @@
                                             <Setter.Value>
                                                 <MultiBinding Converter="{StaticResource KaraokeClipConverter}">
                                                     <Binding Path="Progress"/>
-                                                    <Binding Path="Text"/>
                                                     <Binding Path="ActualWidth" RelativeSource="{RelativeSource Self}"/>
-                                                    <Binding Path="FontSize" RelativeSource="{RelativeSource Self}"/>
-                                                    <Binding Path="FontWeight" RelativeSource="{RelativeSource Self}"/>
-                                                    <Binding RelativeSource="{RelativeSource Self}"/>
                                                 </MultiBinding>
                                             </Setter.Value>
                                         </Setter>
@@ -223,6 +236,8 @@
                             </Style>
                         </TextBlock.Style>
                     </TextBlock>
+                </Grid>
+                </helpers:MarqueeContainer>
                 </Grid>
                 <TextBlock Text="{Binding Translation}" TextAlignment="Center" TextWrapping="Wrap" Margin="0,2,0,0">
                     <TextBlock.Style>

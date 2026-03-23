@@ -12,6 +12,9 @@ namespace WpfMusicPlayer.ViewModels;
 
 public class MainViewModel : ViewModelBase, IDisposable
 {
+    // 业务逻辑在这里写
+    // 不要把业务逻辑写在View里！！！
+    // 这里不要直接操作UI！！！
     private readonly IFileDialogService _fileDialogService;
     private readonly ISmtcService _smtcService;
     private readonly SynchronizationContext _syncContext;
@@ -186,8 +189,10 @@ public class MainViewModel : ViewModelBase, IDisposable
         IsDraggingSlider = false;
         if (!isPlaying)
         {
-            OnTimeChanged(targetTime);
+            ProgressValue = targetTime;
+            CurrentTime = FormatTime(targetTime);
         }
+        UpdateLyricProgress(targetTime);
     }
 
     public async void SeekToLyric(LyricLineViewModel lyric)
@@ -213,8 +218,10 @@ public class MainViewModel : ViewModelBase, IDisposable
         IsDraggingSlider = false;
         if (!isPlaying)
         {
-            OnTimeChanged(targetTimeSec);
+            ProgressValue = targetTimeSec;
+            CurrentTime = FormatTime(targetTimeSec);
         }
+        UpdateLyricProgress(targetTimeSec);
     }
 
     public void OnWindowClosed()
@@ -325,27 +332,32 @@ public class MainViewModel : ViewModelBase, IDisposable
 
             ProgressValue = time;
             CurrentTime = FormatTime(time);
-            if (_lrcFileController == null) return;
-            _lrcFileController.SetTimeStamp((int)(time * 1000));
-            var newIndex = _lrcFileController.GetCurrentLrcNodeIndex();
-
-            if (newIndex != CurrentLyricIndex && newIndex >= 0 && newIndex < Lyrics.Count)
-            {
-                if (CurrentLyricIndex >= 0 && CurrentLyricIndex < Lyrics.Count)
-                {
-                    Lyrics[CurrentLyricIndex].IsHighlighted = false;
-                    Lyrics[CurrentLyricIndex].Progress = 0;
-                }
-                CurrentLyricIndex = newIndex;
-                Lyrics[CurrentLyricIndex].IsHighlighted = true;
-            }
-
-            if (CurrentLyricIndex >= 0 && CurrentLyricIndex < Lyrics.Count
-                && Lyrics[CurrentLyricIndex].IsProgressEnabled)
-            {
-                Lyrics[CurrentLyricIndex].Progress = _lrcFileController.GetLrcPercentage(CurrentLyricIndex);
-            }
+            UpdateLyricProgress(time);
         }, null);
+    }
+
+    private void UpdateLyricProgress(float time)
+    {
+        if (_lrcFileController == null) return;
+        _lrcFileController.SetTimeStamp((int)(time * 1000));
+        var newIndex = _lrcFileController.GetCurrentLrcNodeIndex();
+
+        if (newIndex != CurrentLyricIndex && newIndex >= 0 && newIndex < Lyrics.Count)
+        {
+            if (CurrentLyricIndex >= 0 && CurrentLyricIndex < Lyrics.Count)
+            {
+                Lyrics[CurrentLyricIndex].IsHighlighted = false;
+                Lyrics[CurrentLyricIndex].Progress = 0;
+            }
+            CurrentLyricIndex = newIndex;
+            Lyrics[CurrentLyricIndex].IsHighlighted = true;
+        }
+
+        if (CurrentLyricIndex >= 0 && CurrentLyricIndex < Lyrics.Count
+            && Lyrics[CurrentLyricIndex].IsProgressEnabled)
+        {
+            Lyrics[CurrentLyricIndex].Progress = _lrcFileController.GetLrcPercentage(CurrentLyricIndex);
+        }
     }
 
     private void OnStart()
@@ -368,6 +380,7 @@ public class MainViewModel : ViewModelBase, IDisposable
             PlayPauseContent = "\u25B6";
             _smtcService.UpdatePlaybackStatus(PlaybackState.Paused);
             _smtcService.UpdateTimeline(TimeSpan.FromSeconds(ProgressValue), TimeSpan.FromSeconds(ProgressMaximum));
+            UpdateLyricProgress((float)ProgressValue);
         }, null);
     }
 

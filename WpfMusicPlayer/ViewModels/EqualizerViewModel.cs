@@ -23,6 +23,8 @@ public class EqualizerViewModel : ViewModelBase
             Bands.Add(new EqualizerBandViewModel(i, labels[i], OnBandValueChanged));
         }
 
+        // 欢迎提交PR提供更多预设值！
+        // 随便调的，感觉还行
         Presets =
         [
             new("默认",     [0,  0,  0,  0,  0,  0,  0,  0,  0,  0]),
@@ -80,6 +82,7 @@ public class EqualizerViewModel : ViewModelBase
         return true;
     }
 
+    // 从播放器获取当前均衡器设置并更新界面
     public void SyncFromPlayer(Func<int, int> getBand)
     {
         _suppressPresetSwitch = true;

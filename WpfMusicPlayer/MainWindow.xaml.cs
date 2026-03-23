@@ -12,9 +12,9 @@ using WpfMusicPlayer.ViewModels;
 
 namespace WpfMusicPlayer
 {
-    /// <summary>
-    /// Interaction logic for MainWindow.xaml
-    /// </summary>
+    // View
+    // 没有业务逻辑，业务逻辑去ViewModel写
+    // 谁在这里写业务逻辑我打死谁
     public partial class MainWindow : Window
     {
         private MainViewModel ViewModel => (MainViewModel)DataContext;
@@ -242,8 +242,8 @@ namespace WpfMusicPlayer
             AnimateTranslate(inSongTranslate, 0, 0, duration, easing);
             AnimateTranslate(inLyricsTranslate, 0, 0, duration, easing);
 
-            // Fade LandscapeSongInfo separately since it's in the bottom bar, not
-            // part of the incoming/outgoing content areas.
+
+            // 歌曲信息淡入淡出动画
             if (!toPortrait)
             {
                 var songFadeIn = new DoubleAnimation(1, new Duration(TimeSpan.FromMilliseconds(300)))
@@ -366,11 +366,11 @@ namespace WpfMusicPlayer
             var duration = new Duration(TimeSpan.FromMilliseconds(250));
             var easing = new CubicEase { EasingMode = EasingMode.EaseOut };
 
-            // Slide panel in
+            // 面板进入缓动
             var slideIn = new DoubleAnimation(0, duration) { EasingFunction = easing };
             SidebarTranslate.BeginAnimation(TranslateTransform.XProperty, slideIn);
 
-            // Fade backdrop in
+            // 背景淡入缓动
             var fadeIn = new DoubleAnimation(1, duration) { EasingFunction = easing };
             SidebarBackdrop.BeginAnimation(OpacityProperty, fadeIn);
         }
@@ -382,11 +382,12 @@ namespace WpfMusicPlayer
             var duration = new Duration(TimeSpan.FromMilliseconds(200));
             var easing = new CubicEase { EasingMode = EasingMode.EaseIn };
 
-            // Slide panel out
+            // 面板退出缓动
             var slideOut = new DoubleAnimation(-280, duration) { EasingFunction = easing };
             SidebarTranslate.BeginAnimation(TranslateTransform.XProperty, slideOut);
 
-            // Fade backdrop out, then collapse the overlay
+            // 背景淡出缓动
+            // 在淡出动画完成后将背景隐藏
             var fadeOut = new DoubleAnimation(0, duration) { EasingFunction = easing };
             fadeOut.Completed += (_, _) =>
             {
@@ -472,7 +473,7 @@ namespace WpfMusicPlayer
             {
                 case 0: // About
                     WpfMessageBox.Show(
-                        "今日は魔法にかかったメイド\nささやかな晴れ舞台",
+                        "今日は魔法にかかったメイド\nささやかな晴れ舞台", // 大爱MIMI！
                         "关于 WpfMusicPlayer...",
                         WpfMessageBoxIcon.Information);
                     break;

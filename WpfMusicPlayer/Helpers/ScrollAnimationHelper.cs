@@ -19,6 +19,7 @@ public static class ScrollAnimationHelper
             sv.ScrollToVerticalOffset((double)e.NewValue);
     }
 
+    // 使用立方体缓动滚动列表框到指定垂直偏移
     public static void AnimateScrollToVerticalOffset(ScrollViewer scrollViewer, double toOffset, TimeSpan duration)
     {
         toOffset = Math.Max(0, Math.Min(toOffset, scrollViewer.ScrollableHeight));

@@ -17,9 +17,8 @@ public partial class WpfMessageBox : Window
         InitializeComponent();
     }
 
-    /// <summary>
-    /// Shows a modern-styled message dialog.
-    /// </summary>
+    // AfxMessageBox和MessageBox.Show丑死了
+    // 写个简单的凑合着用用
     public static void Show(string message, string title,
         WpfMessageBoxIcon icon = WpfMessageBoxIcon.None)
     {
