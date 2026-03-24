@@ -20,6 +20,7 @@ namespace WpfMusicPlayer
     {
         private MainViewModel ViewModel => (MainViewModel)DataContext;
         private TranslateTransform PlaylistTranslate => (TranslateTransform)PlaylistContent.RenderTransform;
+        private TranslateTransform SettingsTranslate => (TranslateTransform)SettingsContent.RenderTransform;
         private TranslateTransform PortraitSongInfoTranslate => (TranslateTransform)PortraitSongInfoView.RenderTransform;
         private bool _isSidebarOpen;
         private bool _isEqualizerOpen;
@@ -34,7 +35,7 @@ namespace WpfMusicPlayer
 
             InitializeComponent();
             var smtcService = new SmtcService();
-            DataContext = new MainViewModel(ConfigProvider.Render, new FileDialogService(), smtcService, new SongDatabaseService());
+            DataContext = new MainViewModel(ConfigProvider.Reader, new FileDialogService(), smtcService, new SongDatabaseService());
             AtlTraceRedirectManager.Init();
             SourceInitialized += (s, e) =>
             {
@@ -67,15 +68,14 @@ namespace WpfMusicPlayer
                 return;
             }
 
-            if (e.PropertyName == nameof(MainViewModel.IsPlaylistVisible))
+            if (e.PropertyName == nameof(MainViewModel.ActiveView))
             {
-                var gen = ++_playlistAnimGen;
-                if (_playlistAnimGen == int.MaxValue)
-                    _playlistAnimGen = 0; // 防止溢出，但是有哪个神人会拖动播放器几千年吗
-                if (ViewModel.IsPlaylistVisible)
-                    AnimateToPlaylist(gen);
-                else
-                    AnimateToPlayer(gen);
+                var gen = ++_viewAnimGen;
+                if (_viewAnimGen == int.MaxValue)
+                    _viewAnimGen = 0;
+                var oldView = _previousView;
+                _previousView = ViewModel.ActiveView;
+                AnimateViewTransition(oldView, ViewModel.ActiveView, gen);
                 return;
             }
 
@@ -176,7 +176,7 @@ namespace WpfMusicPlayer
             if (shouldBePortrait == _isPortrait) return;
             _isPortrait = shouldBePortrait;
 
-            if (ViewModel.IsPlaylistVisible)
+            if (ViewModel.ActiveView != ActiveView.Player)
             {
                 PlayerToolbar.VolumePanelElement.Visibility = shouldBePortrait ? Visibility.Collapsed : Visibility.Visible;
                 return;
@@ -188,41 +188,74 @@ namespace WpfMusicPlayer
             AnimateLayoutSwitch(shouldBePortrait, gen);
         }
 
-        // 动画防抖（布局切换，播放列表）
+        // 动画防抖（布局切换，视图切换）
         // 用代数标记每次动画
         // 旧代数的动画即使在队列中也会被忽略
         private int _layoutAnimGen;
-        private int _playlistAnimGen;
+        private int _viewAnimGen;
+        private ActiveView _previousView;
 
-        private void AnimateToPlaylist(int gen)
+        private void AnimateViewTransition(ActiveView from, ActiveView to, int gen)
+        {
+            if (from == to) return;
+            if (to == ActiveView.Player)
+                AnimateOverlayToPlayer(from, gen);
+            else
+                AnimateToOverlay(from, to, gen);
+        }
+
+        private FrameworkElement GetViewElement(ActiveView view) => view switch
+        {
+            ActiveView.Player => _isPortrait ? PortraitContent : LandscapeContent,
+            ActiveView.Playlist => PlaylistContent,
+            ActiveView.Settings => SettingsContent,
+            _ => throw new ArgumentOutOfRangeException(nameof(view))
+        };
+
+        private TranslateTransform GetOverlayTranslate(ActiveView view) => view switch
+        {
+            ActiveView.Playlist => PlaylistTranslate,
+            ActiveView.Settings => SettingsTranslate,
+            _ => throw new ArgumentOutOfRangeException(nameof(view))
+        };
+
+        private void ClearOverlayTransformAnimations(ActiveView view)
+        {
+            var translate = GetOverlayTranslate(view);
+            translate.BeginAnimation(TranslateTransform.XProperty, null);
+            translate.BeginAnimation(TranslateTransform.YProperty, null);
+            translate.X = 0;
+            translate.Y = 0;
+        }
+
+        private void AnimateToOverlay(ActiveView from, ActiveView to, int gen)
         {
             ClearLayoutAnimations();
 
-            var outgoing = _isPortrait ? (FrameworkElement)PortraitContent : LandscapeContent;
+            var outgoing = GetViewElement(from);
+            var incoming = GetViewElement(to);
+            var incomingTranslate = GetOverlayTranslate(to);
 
             var duration = new Duration(TimeSpan.FromMilliseconds(350));
             var easing = new CubicEase { EasingMode = EasingMode.EaseInOut };
 
-            // 准备playlist：从底部偏移，透明
-            PlaylistContent.Visibility = Visibility.Visible;
-            PlaylistContent.Opacity = 0;
-            PlaylistTranslate.Y = 40;
+            incoming.Visibility = Visibility.Visible;
+            incoming.Opacity = 0;
+            incomingTranslate.Y = 40;
 
-            // 淡出当前播放界面
             var fadeOut = new DoubleAnimation(0, new Duration(TimeSpan.FromMilliseconds(220)))
             {
                 EasingFunction = new CubicEase { EasingMode = EasingMode.EaseIn }
             };
             fadeOut.Completed += (_, _) =>
             {
-                if (_playlistAnimGen != gen) return;
+                if (_viewAnimGen != gen) return;
                 outgoing.Visibility = Visibility.Collapsed;
                 outgoing.BeginAnimation(OpacityProperty, null);
                 outgoing.Opacity = 1;
             };
             outgoing.BeginAnimation(OpacityProperty, fadeOut);
 
-            // Playlist淡入，上移
             var fadeIn = new DoubleAnimation(1, new Duration(TimeSpan.FromMilliseconds(320)))
             {
                 EasingFunction = easing,
@@ -230,60 +263,59 @@ namespace WpfMusicPlayer
             };
             fadeIn.Completed += (_, _) =>
             {
-                if (_playlistAnimGen != gen) return;
-                PlaylistContent.BeginAnimation(OpacityProperty, null);
-                PlaylistContent.Opacity = 1;
-                ClearPlaylistTransformAnimations();
+                if (_viewAnimGen != gen) return;
+                incoming.BeginAnimation(OpacityProperty, null);
+                incoming.Opacity = 1;
+                ClearOverlayTransformAnimations(to);
             };
-            PlaylistContent.BeginAnimation(OpacityProperty, fadeIn);
+            incoming.BeginAnimation(OpacityProperty, fadeIn);
 
             var slideUp = new DoubleAnimation(0, duration)
             {
                 EasingFunction = easing,
                 BeginTime = TimeSpan.FromMilliseconds(80)
             };
-            PlaylistTranslate.BeginAnimation(TranslateTransform.YProperty, slideUp);
+            incomingTranslate.BeginAnimation(TranslateTransform.YProperty, slideUp);
         }
 
-        private void AnimateToPlayer(int gen)
+        private void AnimateOverlayToPlayer(ActiveView from, int gen)
         {
             ClearLayoutAnimations();
 
             var incoming = _isPortrait ? (FrameworkElement)PortraitContent : LandscapeContent;
+            var outgoing = GetViewElement(from);
+            var outgoingTranslate = GetOverlayTranslate(from);
 
             var duration = new Duration(TimeSpan.FromMilliseconds(350));
             var easing = new CubicEase { EasingMode = EasingMode.EaseInOut };
 
-            // 准备播放界面：透明，微向下偏移
             incoming.Visibility = Visibility.Visible;
             incoming.Opacity = 0;
 
             var inTranslate = _isPortrait ? PortraitLyricsView.LyricsTranslate : LandscapeLyricsView.LyricsTranslate;
             inTranslate.Y = 30;
 
-            // 淡出playlist，下沉
-            PlaylistTranslate.Y = 0;
+            outgoingTranslate.Y = 0;
             var fadeOut = new DoubleAnimation(0, new Duration(TimeSpan.FromMilliseconds(220)))
             {
                 EasingFunction = new CubicEase { EasingMode = EasingMode.EaseIn }
             };
             fadeOut.Completed += (_, _) =>
             {
-                if (_playlistAnimGen != gen) return;
-                PlaylistContent.Visibility = Visibility.Collapsed;
-                PlaylistContent.BeginAnimation(OpacityProperty, null);
-                PlaylistContent.Opacity = 1;
-                ClearPlaylistTransformAnimations();
+                if (_viewAnimGen != gen) return;
+                outgoing.Visibility = Visibility.Collapsed;
+                outgoing.BeginAnimation(OpacityProperty, null);
+                outgoing.Opacity = 1;
+                ClearOverlayTransformAnimations(from);
             };
-            PlaylistContent.BeginAnimation(OpacityProperty, fadeOut);
+            outgoing.BeginAnimation(OpacityProperty, fadeOut);
 
             var slideDown = new DoubleAnimation(30, new Duration(TimeSpan.FromMilliseconds(250)))
             {
                 EasingFunction = new CubicEase { EasingMode = EasingMode.EaseIn }
             };
-            PlaylistTranslate.BeginAnimation(TranslateTransform.YProperty, slideDown);
+            outgoingTranslate.BeginAnimation(TranslateTransform.YProperty, slideDown);
 
-            // 播放界面淡入 内容上移
             var fadeIn = new DoubleAnimation(1, new Duration(TimeSpan.FromMilliseconds(320)))
             {
                 EasingFunction = easing,
@@ -291,7 +323,7 @@ namespace WpfMusicPlayer
             };
             fadeIn.Completed += (_, _) =>
             {
-                if (_playlistAnimGen != gen) return;
+                if (_viewAnimGen != gen) return;
                 incoming.BeginAnimation(OpacityProperty, null);
                 incoming.Opacity = 1;
                 ClearTransformAnimations(inTranslate, null);
@@ -311,14 +343,6 @@ namespace WpfMusicPlayer
                 BeginTime = TimeSpan.FromMilliseconds(80)
             };
             inTranslate.BeginAnimation(TranslateTransform.YProperty, contentSlide);
-        }
-
-        private void ClearPlaylistTransformAnimations()
-        {
-            PlaylistTranslate.BeginAnimation(TranslateTransform.XProperty, null);
-            PlaylistTranslate.BeginAnimation(TranslateTransform.YProperty, null);
-            PlaylistTranslate.X = 0;
-            PlaylistTranslate.Y = 0;
         }
 
         private async void AnimateLayoutSwitch(bool toPortrait, int gen)
@@ -451,6 +475,8 @@ namespace WpfMusicPlayer
             PlayerToolbar.LandscapeSongInfo.Opacity = 1;
             PlaylistContent.BeginAnimation(OpacityProperty, null);
             PlaylistContent.Opacity = 1;
+            SettingsContent.BeginAnimation(OpacityProperty, null);
+            SettingsContent.Opacity = 1;
 
             ClearTransformAnimations(LandscapeAlbumTranslate, LandscapeAlbumScale);
             ClearTransformAnimations(PlayerToolbar.LandscapeSongInfoTranslate, null);
@@ -458,7 +484,8 @@ namespace WpfMusicPlayer
             ClearTransformAnimations(PortraitAlbumTranslate, PortraitAlbumScale);
             ClearTransformAnimations(PortraitSongInfoTranslate, null);
             ClearTransformAnimations(PortraitLyricsView.LyricsTranslate, null);
-            ClearPlaylistTransformAnimations();
+            ClearOverlayTransformAnimations(ActiveView.Playlist);
+            ClearOverlayTransformAnimations(ActiveView.Settings);
         }
 
         private static void ClearTransformAnimations(TranslateTransform t, ScaleTransform? s)
@@ -558,13 +585,15 @@ namespace WpfMusicPlayer
                     ViewModel.OpenCommand.Execute(null);
                     break;
                 case 1: // Playlist
-                    ViewModel.IsPlaylistVisible = !ViewModel.IsPlaylistVisible;
+                    ViewModel.ActiveView = ViewModel.ActiveView == ActiveView.Playlist
+                        ? ActiveView.Player : ActiveView.Playlist;
                     break;
                 case 2: // Equalizer
                     OpenEqualizer();
                     break;
                 case 3: // Settings
-                    // TODO: implement settings view
+                    ViewModel.ActiveView = ViewModel.ActiveView == ActiveView.Settings
+                        ? ActiveView.Player : ActiveView.Settings;
                     break;
             }
         }

@@ -8,10 +8,10 @@ namespace WpfMusicPlayer.Services
 {
     public class ConfigProvider : IConfigProvider
     {
-        private static readonly Lazy<ConfigProvider> render = new Lazy<ConfigProvider>(() => new ConfigProvider());
-        public static ConfigProvider Render => render.Value;
+        private static readonly Lazy<ConfigProvider> _reader = new Lazy<ConfigProvider>(() => new ConfigProvider());
+        public static ConfigProvider Reader => _reader.Value;
 
-        private ConfigProvider(string ConfigFileName = "config.xml") => Reload(ConfigFileName);
+        private ConfigProvider(string configFileName = "config.xml") => Reload(configFileName);
         ~ConfigProvider()
         {
             WriteFile();
@@ -27,23 +27,35 @@ namespace WpfMusicPlayer.Services
 
             UnknownError
         }
-        private ErrorCode InternalCreateConfigFile(string ConfigFilePath)
+        private ErrorCode InternalCreateConfigFile(string configFilePath)
         {
-            ConfigData = new ConfigData { Theme = ThemeMode.System, Background = BackgroundMode.Acrylic };
+            _configData = new ConfigData
+            {
+                UI = new UISettings
+                {
+                    Background = UISettings.BackgroundMode.ImageBlur,
+                    Theme = UISettings.ThemeMode.System
+                },
+                Audio = new AudioSettings
+                {
+                    Channel = AudioSettings.ChannelType.Stereo,
+                    SampleRate = 48000
+                }
+            };
 
-            return InternalWriteFile(ConfigFilePath);
+            return InternalWriteFile(configFilePath);
         }
-        public ErrorCode CreateConfigFile(string ConfigFileName = "config.xml")
+        public ErrorCode CreateConfigFile(string configFileName = "config.xml")
         {
             try
             {
-                var ConfigFilePath = Path.GetDirectoryName(Assembly.GetExecutingAssembly().Location);
-                if (ConfigFilePath == null)
+                var configFilePath = Path.GetDirectoryName(Assembly.GetExecutingAssembly().Location);
+                if (configFilePath == null)
                     return ErrorCode.PermissionDenied;
 
-                var ConfigFile = Path.Combine(ConfigFilePath, ConfigFileName);
+                var configFile = Path.Combine(configFilePath, configFileName);
 
-                return InternalCreateConfigFile(ConfigFile);
+                return InternalCreateConfigFile(configFile);
             }
             catch (PathTooLongException)
             {
@@ -58,26 +70,26 @@ namespace WpfMusicPlayer.Services
         {
             try
             {
-                var ConfigFilePath = Path.GetDirectoryName(Assembly.GetExecutingAssembly().Location);
-                if (ConfigFilePath == null)
+                var configFilePath = Path.GetDirectoryName(Assembly.GetExecutingAssembly().Location);
+                if (configFilePath == null)
                     return ErrorCode.PermissionDenied;
 
-                var ConfigFile = Path.Combine(ConfigFilePath, ConfigFileName);
-                if (!File.Exists(ConfigFile))
-                    return InternalCreateConfigFile(ConfigFile);
+                var configFile = Path.Combine(configFilePath, ConfigFileName);
+                if (!File.Exists(configFile))
+                    return InternalCreateConfigFile(configFile);
 
                 try
                 {
-                    using var File = new FileStream(ConfigFile, FileMode.Open, FileAccess.Read);
+                    using var file = new FileStream(configFile, FileMode.Open, FileAccess.Read);
 
                     try
                     {
-                        var XmlSerializer = new XmlSerializer(typeof(ConfigData));
-                        ConfigData? XmlConfigData = (ConfigData?)XmlSerializer.Deserialize(File);
-                        if (XmlConfigData == null)
+                        var xmlSerializer = new XmlSerializer(typeof(ConfigData));
+                        var xmlConfigData = (ConfigData?)xmlSerializer.Deserialize(file);
+                        if (xmlConfigData == null)
                             return ErrorCode.ConfigFileError;
 
-                        ConfigData = XmlConfigData;
+                        _configData = xmlConfigData;
                     }
                     catch (InvalidOperationException)
                     {
@@ -101,12 +113,12 @@ namespace WpfMusicPlayer.Services
             return ErrorCode.NoError;
         }
 
-        private ErrorCode InternalWriteFile(string ConfigFilePath)
+        private ErrorCode InternalWriteFile(string configFilePath)
         {
             try
             {
-                using var File = new FileStream(ConfigFilePath, FileMode.Create, FileAccess.Write);
-                new XmlSerializer(typeof(ConfigData)).Serialize(File, ConfigData);
+                using var file = new FileStream(configFilePath, FileMode.Create, FileAccess.Write);
+                new XmlSerializer(typeof(ConfigData)).Serialize(file, _configData);
             }
             catch (UnauthorizedAccessException)
             {
@@ -119,17 +131,17 @@ namespace WpfMusicPlayer.Services
 
             return ErrorCode.NoError;
         }
-        public ErrorCode WriteFile(string ConfigFileName = "config.xml")
+        public ErrorCode WriteFile(string configFileName = "config.xml")
         {
             try
             {
-                var ConfigFilePath = Path.GetDirectoryName(Assembly.GetExecutingAssembly().Location);
-                if (ConfigFilePath == null)
+                var configFilePath = Path.GetDirectoryName(Assembly.GetExecutingAssembly().Location);
+                if (configFilePath == null)
                     return ErrorCode.PermissionDenied;
 
-                var ConfigFile = Path.Combine(ConfigFilePath, ConfigFileName);
+                var configFile = Path.Combine(configFilePath, configFileName);
 
-                return InternalWriteFile(ConfigFile);
+                return InternalWriteFile(configFile);
             }
             catch (PathTooLongException)
             {
@@ -143,9 +155,9 @@ namespace WpfMusicPlayer.Services
 
         public ref ConfigData GetConfig()
         {
-            return ref ConfigData;
+            return ref _configData;
         }
 
-        private static ConfigData ConfigData = new ConfigData();
+        private static ConfigData _configData = new ConfigData();
     }
 }

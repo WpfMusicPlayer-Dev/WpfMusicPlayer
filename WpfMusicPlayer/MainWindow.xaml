@@ -144,6 +144,13 @@
                 </views:PlaylistView.RenderTransform>
             </views:PlaylistView>
 
+            <views:SettingsView x:Name="SettingsContent" Grid.Row="0" Visibility="Collapsed"
+                                DataContext="{Binding Settings}">
+                <views:SettingsView.RenderTransform>
+                    <TranslateTransform/>
+                </views:SettingsView.RenderTransform>
+            </views:SettingsView>
+
             <Grid x:Name="PortraitContent" Grid.Row="0" Margin="20" Visibility="Collapsed">
                 <Grid.RowDefinitions>
                     <RowDefinition Height="*"/>

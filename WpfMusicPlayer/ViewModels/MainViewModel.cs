@@ -12,6 +12,8 @@ using WpfMusicPlayer.Services;
 
 namespace WpfMusicPlayer.ViewModels;
 
+public enum ActiveView { Player, Playlist, Settings }
+
 public class MainViewModel : ViewModelBase, IDisposable
 {
     // 业务逻辑在这里写
@@ -38,6 +40,7 @@ public class MainViewModel : ViewModelBase, IDisposable
         _songDatabase = songDatabase;
         _syncContext = SynchronizationContext.Current!;
         Equalizer = new EqualizerViewModel(ApplyEqualizerBand);
+        Settings = new SettingsViewModel(configProvider);
         _sampleRate = 48000; // Studio quality
         _musicPlayer = new MusicPlayer(_sampleRate);
 
@@ -171,11 +174,13 @@ public class MainViewModel : ViewModelBase, IDisposable
 
     public ObservableCollection<PlaylistItemViewModel> PlaylistItems { get; } = [];
 
-    public bool IsPlaylistVisible
+    public ActiveView ActiveView
     {
         get;
         set => SetProperty(ref field, value);
     }
+
+    public SettingsViewModel Settings { get; }
 
     public ICommand PlayPauseCommand { get; }
     public ICommand OpenCommand { get; }
@@ -188,6 +193,10 @@ public class MainViewModel : ViewModelBase, IDisposable
 
     public void OpenFile(string filePath)
     {
+        if (ActiveView != ActiveView.Player)
+            _syncContext.Send(_ => ActiveView = ActiveView.Player, null);
+
+
         var isNcm = Path.GetExtension(filePath).Equals(".ncm", StringComparison.OrdinalIgnoreCase);
         if (isNcm)
         {
@@ -740,7 +749,7 @@ public class MainViewModel : ViewModelBase, IDisposable
 
     private void OnTogglePlaylist()
     {
-        IsPlaylistVisible = !IsPlaylistVisible;
+        ActiveView = ActiveView == ActiveView.Playlist ? ActiveView.Player : ActiveView.Playlist;
     }
 
     private void AddToPlaylist()
