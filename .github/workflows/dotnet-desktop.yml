@@ -21,8 +21,10 @@ jobs:
 
       - name: Check GITHUB_TOKEN permissions
         shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          $resp = gh api /repos/${{ github.repository }}/actions/permissions/workflow -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" --jq ".permissions.packages"
+          $resp = gh api /repos/${{ github.repository }}/actions/permissions/workflow --jq ".permissions.packages"
 
           Write-Host "packages permission = $resp"
 
@@ -30,6 +32,7 @@ jobs:
             Write-Error "no packages:write permission. aborting..."
             exit 1
           }
+
       
       - name: Print runner hardware info
         shell: pwsh
