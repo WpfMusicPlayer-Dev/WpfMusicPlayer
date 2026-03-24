@@ -7,9 +7,6 @@ on:
 jobs:
   build:
     runs-on: self-hosted
-    permissions:
-      contents: read
-      packages: write
 
     env:
       VCPKG_ROOT: ${{ github.workspace }}/vcpkg
