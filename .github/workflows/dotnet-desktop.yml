@@ -6,7 +6,9 @@ on:
 
 jobs:
   build:
-    runs-on: self-hosted
+    permissions:
+      contents: read
+      packages: write
 
     env:
       VCPKG_ROOT: ${{ github.workspace }}/vcpkg
@@ -15,6 +17,20 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Check GITHUB_TOKEN permissions
+        shell: pwsh
+        run: |
+          $resp = gh api /repos/${{ github.repository }}/actions/permissions/workflow \
+            -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" `
+            --jq ".permissions.packages"
+
+          Write-Host "packages permission = $resp"
+
+          if ($resp -ne "write") {
+            Write-Error "no packages:write permission. aborting..."
+            exit 1
+          }
+      
       - name: Print runner hardware info
         shell: pwsh
         run: |
