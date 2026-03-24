@@ -2,6 +2,7 @@
 using System.Windows;
 using System.Windows.Interop;
 using System.Windows.Media;
+using Windows.UI;
 
 namespace WpfMusicPlayer.Helpers;
 
@@ -9,6 +10,10 @@ internal static class GaussianBlueHelper
 {
     [DllImport("user32.dll")]
     private static extern int SetWindowCompositionAttribute(IntPtr hwnd, ref WindowCompositionAttributeData data);
+
+    [DllImport("user32.dll")]
+    private static extern bool SetWindowPos(IntPtr hWnd, IntPtr hWndInsertAfter,
+        int X, int Y, int cx, int cy, uint uFlags);
 
     [DllImport("dwmapi.dll")]
     private static extern int DwmExtendFrameIntoClientArea(IntPtr hwnd, ref Margins margins);
@@ -43,8 +48,14 @@ internal static class GaussianBlueHelper
     }
 
     private const int WCA_ACCENT_POLICY = 19;
+    private const int ACCENT_ENABLE_GRADIENT = 1;
     private const int ACCENT_ENABLE_BLURBEHIND = 3;
+    private const int ACCENT_ENABLE_ACRYLICBLURBEHIND = 4;
     private const int DWMWA_USE_IMMERSIVE_DARK_MODE = 20;
+    private const uint SWP_NOMOVE = 0x0002;
+    private const uint SWP_NOSIZE = 0x0001;
+    private const uint SWP_NOZORDER = 0x0004;
+    private const uint SWP_FRAMECHANGED = 0x0020;
 
     [DllImport("ntdll.dll")]
     static extern int RtlGetVersion(ref OSVERSIONINFOEX versionInfo);
@@ -63,7 +74,7 @@ internal static class GaussianBlueHelper
 
     public static bool IsWindows11()
     {
-        OSVERSIONINFOEX v = new OSVERSIONINFOEX();
+        var v = new OSVERSIONINFOEX();
         v.dwOSVersionInfoSize = Marshal.SizeOf(v);
         RtlGetVersion(ref v);
         return v.dwMajorVersion == 10 && v.dwBuildNumber >= 22000;
@@ -77,7 +88,7 @@ internal static class GaussianBlueHelper
         Tabbed = 4
     }
 
-    public static void EnableBlur(Window window, bool enableAcrylic = false, uint tintColor = 0xCC222222)
+    public static void EnableDarkMode(Window window, bool enableAcrylic = false, uint tintColor = 0xCC222222)
     {
         var hwndSource = (HwndSource?)PresentationSource.FromVisual(window);
         if (hwndSource?.CompositionTarget == null)
@@ -91,46 +102,102 @@ internal static class GaussianBlueHelper
         DwmSetWindowAttribute(hwnd, DWMWA_USE_IMMERSIVE_DARK_MODE, ref darkMode, sizeof(int));
 
         hwndSource.CompositionTarget.BackgroundColor = Colors.Transparent;
+    }
 
-        // 去除标题栏（扩展客户端区域到整个窗口）
+    public static void EnableAcrylic(Window window, uint tintColor = 0xCC222222)
+    {
+        var hwndSource = (HwndSource?)PresentationSource.FromVisual(window);
+        if (hwndSource?.CompositionTarget == null)
+            return;
+
+        var hwnd = hwndSource.Handle;
+
+        hwndSource.CompositionTarget.BackgroundColor = Colors.Transparent;
         var margins = new Margins { Left = -1, Right = -1, Top = -1, Bottom = -1 };
         DwmExtendFrameIntoClientArea(hwnd, ref margins);
-        if (!enableAcrylic) return; 
-        if (IsWindows11())
+
+        // Win11: ACCENT_ENABLE_ACRYLICBLURBEHIND (4) -> Acrylic
+        // Win10: ACCENT_ENABLE_BLURBEHIND (3) -> Gaussian Blur
+        var accent = new AccentPolicy
         {
-            // Win11的云母效果好像也不是很好，所以启用Acrylic
-            const int DWMWA_SYSTEMBACKDROP_TYPE = 38;
-            int backdrop = (int)DwmSystemBackdropType.Acrylic;
-            DwmSetWindowAttribute(hwnd, DWMWA_SYSTEMBACKDROP_TYPE, ref backdrop, sizeof(int));
-        } else
+            AccentState = IsWindows11() ? ACCENT_ENABLE_ACRYLICBLURBEHIND : ACCENT_ENABLE_BLURBEHIND,
+            AccentFlags = 2,
+            GradientColor = tintColor
+        };
+
+        ApplyAccent(hwnd, accent);
+    }
+
+    public static void EnableSolid(Window window)
+    {
+        var hwndSource = (HwndSource?)PresentationSource.FromVisual(window);
+        if (hwndSource?.CompositionTarget == null)
+            return;
+
+        var hwnd = hwndSource.Handle;
+
+        var margins = new Margins { Left = -1, Right = -1, Top = -1, Bottom = -1 };
+        DwmExtendFrameIntoClientArea(hwnd, ref margins);
+
+        hwndSource.CompositionTarget.BackgroundColor = Colors.Transparent;
+
+        // 模糊点满，反正看起来像纯黑就对了
+        // 不要用ACCENT_DISABLED 会直接切断DWM管线！！！！！！！！
+        var accent = new AccentPolicy
         {
-            // 回落至高斯模糊，Windows 10似乎对Acrylic支持不好。
-            var accent = new AccentPolicy
+            AccentState = ACCENT_ENABLE_BLURBEHIND,
+            AccentFlags = 2,
+            GradientColor = 0xFF000000,
+            AnimationId = 0
+        };
+
+        ApplyAccent(hwnd, accent);
+    }
+
+    public static void EnableImageBlur(Window window)
+    {
+        var hwndSource = (HwndSource?)PresentationSource.FromVisual(window);
+        if (hwndSource?.CompositionTarget == null)
+            return;
+
+        var hwnd = hwndSource.Handle;
+
+        var margins = new Margins { Left = -1, Right = -1, Top = -1, Bottom = -1 };
+        DwmExtendFrameIntoClientArea(hwnd, ref margins);
+
+        hwndSource.CompositionTarget.BackgroundColor = Colors.Transparent;
+
+        var accent = new AccentPolicy
+        {
+            AccentState = ACCENT_ENABLE_GRADIENT,
+            AccentFlags = 0,
+            GradientColor = 0x00000000, // 完全透明
+            AnimationId = 0
+        };
+
+        ApplyAccent(hwnd, accent);
+    }
+
+    private static void ApplyAccent(nint hwnd, AccentPolicy accent)
+    {
+        var accentSize = Marshal.SizeOf<AccentPolicy>();
+        var accentPtr = Marshal.AllocHGlobal(accentSize);
+        try
+        {
+            Marshal.StructureToPtr(accent, accentPtr, false);
+
+            var data = new WindowCompositionAttributeData
             {
-                AccentState = ACCENT_ENABLE_BLURBEHIND,
-                AccentFlags = 2,
-                GradientColor = tintColor
+                Attribute = WCA_ACCENT_POLICY,
+                Data = accentPtr,
+                SizeOfData = accentSize
             };
 
-            var accentSize = Marshal.SizeOf<AccentPolicy>();
-            var accentPtr = Marshal.AllocHGlobal(accentSize);
-            try
-            {
-                Marshal.StructureToPtr(accent, accentPtr, false);
-
-                var data = new WindowCompositionAttributeData
-                {
-                    Attribute = WCA_ACCENT_POLICY,
-                    Data = accentPtr,
-                    SizeOfData = accentSize
-                };
-
-                SetWindowCompositionAttribute(hwnd, ref data);
-            }
-            finally
-            {
-                Marshal.FreeHGlobal(accentPtr);
-            }
+            SetWindowCompositionAttribute(hwnd, ref data);
+        }
+        finally
+        {
+            Marshal.FreeHGlobal(accentPtr);
         }
     }
 }

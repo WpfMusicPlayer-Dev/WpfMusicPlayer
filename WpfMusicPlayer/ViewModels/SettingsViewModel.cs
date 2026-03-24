@@ -1,12 +1,21 @@
+using System.Runtime.CompilerServices;
 using WpfMusicPlayer.Models;
 using WpfMusicPlayer.Services;
 using static WpfMusicPlayer.Models.ConfigData;
 
 namespace WpfMusicPlayer.ViewModels;
 
+public sealed class SettingChangedEventArgs(string settingName) : EventArgs
+{
+    public string SettingName { get; } = settingName;
+}
+
 public class SettingsViewModel : ViewModelBase
 {
     private readonly IConfigProvider _configProvider;
+    private bool _isLoading;
+
+    public event EventHandler<SettingChangedEventArgs>? SettingChanged;
 
     public SettingsViewModel(IConfigProvider configProvider)
     {
@@ -69,20 +78,29 @@ public class SettingsViewModel : ViewModelBase
 
     private void LoadFromConfig()
     {
+        _isLoading = true;
         ref var config = ref _configProvider.GetConfig();
         SelectedTheme = config.UI.Theme;
         SelectedBackground = config.UI.Background;
         SelectedChannel = config.Audio.Channel;
         SelectedSampleRate = config.Audio.SampleRate;
+        _isLoading = false;
     }
 
-    private void ApplyToConfig()
+    private void ApplyToConfig([CallerMemberName] string? settingName = null)
     {
+        if (_isLoading) return;
         ref var config = ref _configProvider.GetConfig();
         config.UI.Theme = SelectedTheme;
         config.UI.Background = SelectedBackground;
         config.Audio.Channel = SelectedChannel;
         config.Audio.SampleRate = SelectedSampleRate;
         _configProvider.WriteFile();
+        OnSettingChanged(settingName!);
+    }
+
+    private void OnSettingChanged(string settingName)
+    {
+        SettingChanged?.Invoke(this, new SettingChangedEventArgs(settingName));
     }
 }

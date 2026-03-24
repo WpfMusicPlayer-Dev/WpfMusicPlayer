@@ -52,7 +52,7 @@
     </Window.Resources>
 
     <Grid>
-        <Border VerticalAlignment="Center"
+        <Border x:Name="BackgroundImageBorder" VerticalAlignment="Center"
                 Width="{Binding ActualWidth, RelativeSource={RelativeSource AncestorType=Window}}"
                 Height="{Binding ActualHeight, RelativeSource={RelativeSource AncestorType=Window}}"
                 IsHitTestVisible="False"
@@ -72,38 +72,59 @@
             </Image>
         </Border>
 
-        <Button
-            Content="☰"
-                WindowChrome.IsHitTestVisibleInChrome="True"
-                VerticalAlignment="Top" HorizontalAlignment="Left"
-                Width="46" Height="32"
-                Background="Transparent" Foreground="White"
-                BorderThickness="0" FontSize="16" FontFamily="Segoe MDL2 Assets"
-                Click="MenuButton_Click"
-                Panel.ZIndex="100">
-            <Button.Style>
-                <Style TargetType="Button">
-                    <Setter Property="Template">
-                        <Setter.Value>
-                            <ControlTemplate TargetType="Button">
-                                <Border x:Name="Bg" Background="Transparent">
-                                    <TextBlock Text="&#xE700;" FontFamily="Segoe MDL2 Assets" FontSize="16"
-                                               Foreground="White" HorizontalAlignment="Center" VerticalAlignment="Center"/>
-                                </Border>
-                                <ControlTemplate.Triggers>
-                                    <Trigger Property="IsMouseOver" Value="True">
-                                        <Setter TargetName="Bg" Property="Background" Value="#20FFFFFF"/>
-                                    </Trigger>
-                                    <Trigger Property="IsPressed" Value="True">
-                                        <Setter TargetName="Bg" Property="Background" Value="#30FFFFFF"/>
-                                    </Trigger>
-                                </ControlTemplate.Triggers>
-                            </ControlTemplate>
-                        </Setter.Value>
-                    </Setter>
-                </Style>
-            </Button.Style>
-        </Button>
+        <StackPanel Orientation="Horizontal" VerticalAlignment="Top" HorizontalAlignment="Left"
+                    Panel.ZIndex="100">
+            <Button Width="46" Height="32" Click="MenuButton_Click"
+                    WindowChrome.IsHitTestVisibleInChrome="True">
+                <Button.Style>
+                    <Style TargetType="Button">
+                        <Setter Property="Template">
+                            <Setter.Value>
+                                <ControlTemplate TargetType="Button">
+                                    <Border x:Name="Bg" Background="Transparent">
+                                        <TextBlock Text="&#xE700;" FontFamily="Segoe MDL2 Assets" FontSize="16"
+                                                   Foreground="White" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                                    </Border>
+                                    <ControlTemplate.Triggers>
+                                        <Trigger Property="IsMouseOver" Value="True">
+                                            <Setter TargetName="Bg" Property="Background" Value="#20FFFFFF"/>
+                                        </Trigger>
+                                        <Trigger Property="IsPressed" Value="True">
+                                            <Setter TargetName="Bg" Property="Background" Value="#30FFFFFF"/>
+                                        </Trigger>
+                                    </ControlTemplate.Triggers>
+                                </ControlTemplate>
+                            </Setter.Value>
+                        </Setter>
+                    </Style>
+                </Button.Style>
+            </Button>
+            <Button Width="46" Height="32" Click="HomeButton_Click"
+                    WindowChrome.IsHitTestVisibleInChrome="True">
+                <Button.Style>
+                    <Style TargetType="Button">
+                        <Setter Property="Template">
+                            <Setter.Value>
+                                <ControlTemplate TargetType="Button">
+                                    <Border x:Name="Bg" Background="Transparent">
+                                        <TextBlock Text="&#xE80F;" FontFamily="Segoe MDL2 Assets" FontSize="16"
+                                                   Foreground="White" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                                    </Border>
+                                    <ControlTemplate.Triggers>
+                                        <Trigger Property="IsMouseOver" Value="True">
+                                            <Setter TargetName="Bg" Property="Background" Value="#20FFFFFF"/>
+                                        </Trigger>
+                                        <Trigger Property="IsPressed" Value="True">
+                                            <Setter TargetName="Bg" Property="Background" Value="#30FFFFFF"/>
+                                        </Trigger>
+                                    </ControlTemplate.Triggers>
+                                </ControlTemplate>
+                            </Setter.Value>
+                        </Setter>
+                    </Style>
+                </Button.Style>
+            </Button>
+        </StackPanel>
 
         <Grid x:Name="ContentArea" Margin="0,32,0,0">
             <Grid.RowDefinitions>

@@ -168,6 +168,7 @@
             <Border Height="1" Background="#15FFFFFF" Margin="0,24,0,14"/>
 
             <TextBlock Text="音频" Foreground="#0078D7" FontSize="15" FontWeight="SemiBold" Margin="0,0,0,14"/>
+			<TextBlock Text="注意：如果您更改了音频设置，您需要重新启动应用程序以使更改生效" Foreground="#FFFFE0" FontSize="12" FontWeight="Bold" Margin="0,0,0,14" TextWrapping="Wrap"/>
 
             <Grid Margin="0,0,0,14">
                 <Grid.ColumnDefinitions>

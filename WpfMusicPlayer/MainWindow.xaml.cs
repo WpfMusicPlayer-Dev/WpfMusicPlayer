@@ -10,6 +10,7 @@ using WpfMusicPlayer.Helpers;
 using WpfMusicPlayer.Services;
 using WpfMusicPlayer.ViewModels;
 using WpfMusicPlayer.Views;
+using static WpfMusicPlayer.Models.ConfigData;
 
 namespace WpfMusicPlayer
 {
@@ -46,13 +47,45 @@ namespace WpfMusicPlayer
             ViewModel.PropertyChanged += ViewModel_PropertyChanged;
         }
 
+        private void ApplyBackgroundMode(UISettings.BackgroundMode mode)
+        {
+            switch (mode)
+            {
+                case UISettings.BackgroundMode.Solid:
+                    GaussianBlueHelper.EnableSolid(this);
+                    BackgroundImageBorder.Visibility = Visibility.Collapsed;
+                    // byd 这里开了Black就会把标题栏一起渲染成黑的
+                    Background = Brushes.Transparent;
+                    break;
+
+                case UISettings.BackgroundMode.Acrylic:
+                    BackgroundImageBorder.Visibility = Visibility.Collapsed;
+                    Background = Brushes.Transparent;
+                    GaussianBlueHelper.EnableAcrylic(this);
+                    break;
+
+                case UISettings.BackgroundMode.ImageBlur:
+                    GaussianBlueHelper.EnableImageBlur(this);
+                    BackgroundImageBorder.Visibility = Visibility.Visible;
+                    Background = Brushes.Transparent;
+                    break;
+            }
+        }
+
         private void OnSourceInitialized(object? sender, EventArgs e)
         {
-            GaussianBlueHelper.EnableBlur(this);
+            GaussianBlueHelper.EnableDarkMode(this);
+            ApplyBackgroundMode(ViewModel.CurrentBackgroundMode);
         }
 
         private void ViewModel_PropertyChanged(object? sender, PropertyChangedEventArgs e)
         {
+            if (e.PropertyName == nameof(MainViewModel.CurrentBackgroundMode))
+            {
+                ApplyBackgroundMode(ViewModel.CurrentBackgroundMode);
+                return;
+            }
+
             if (e.PropertyName == nameof(MainViewModel.IsDecoding))
             {
                 if (ViewModel.IsDecoding)
@@ -525,6 +558,11 @@ namespace WpfMusicPlayer
                 CloseSidebar();
             else
                 OpenSidebar();
+        }
+
+        private void HomeButton_Click(object sender, RoutedEventArgs e)
+        {
+            ViewModel.ActiveView = ActiveView.Player;
         }
 
         private void SidebarBackdrop_MouseLeftButtonDown(object sender, MouseButtonEventArgs e)

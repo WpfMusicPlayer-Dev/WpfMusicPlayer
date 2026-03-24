@@ -9,6 +9,7 @@ using System.Windows.Media.Imaging;
 using WpfMusicPlayer.Helpers;
 using WpfMusicPlayer.Models;
 using WpfMusicPlayer.Services;
+using static WpfMusicPlayer.Models.ConfigData;
 
 namespace WpfMusicPlayer.ViewModels;
 
@@ -41,6 +42,8 @@ public class MainViewModel : ViewModelBase, IDisposable
         _syncContext = SynchronizationContext.Current!;
         Equalizer = new EqualizerViewModel(ApplyEqualizerBand);
         Settings = new SettingsViewModel(configProvider);
+        Settings.SettingChanged += OnSettingChanged;
+        CurrentBackgroundMode = configProvider.GetConfig().UI.Background;
         _sampleRate = 48000; // Studio quality
         _musicPlayer = new MusicPlayer(_sampleRate);
 
@@ -182,6 +185,12 @@ public class MainViewModel : ViewModelBase, IDisposable
 
     public SettingsViewModel Settings { get; }
 
+    public UISettings.BackgroundMode CurrentBackgroundMode
+    {
+        get;
+        private set => SetProperty(ref field, value);
+    }
+
     public ICommand PlayPauseCommand { get; }
     public ICommand OpenCommand { get; }
     public ICommand PrevCommand { get; }
@@ -288,8 +297,17 @@ public class MainViewModel : ViewModelBase, IDisposable
         }
     }
 
+    private void OnSettingChanged(object? sender, SettingChangedEventArgs e)
+    {
+        if (e.SettingName == nameof(SettingsViewModel.SelectedBackground))
+        {
+            CurrentBackgroundMode = _configProvider.GetConfig().UI.Background;
+        }
+    }
+
     public void Dispose()
     {
+        Settings.SettingChanged -= OnSettingChanged;
         GCSettings.LatencyMode = _previousLatencyMode;
         _musicPlayer.Dispose();
         _songDatabase.Dispose();
