@@ -3,15 +3,18 @@ name: Build
 on:
   push:
   pull_request:
+    
+permissions:
+  contents: read
+  packages: write
 
 jobs:
   build:
-    runs-on: windows-2025-vs2026 
+    runs-on: self-hosted
 
     env:
       VCPKG_ROOT: ${{ github.workspace }}/vcpkg
       VCPKG_DEFAULT_TRIPLET: x64-windows
-      VCPKG_BINARY_SOURCES: clear;files,${{ github.workspace }}\.vcpkg-cache,readwrite
 
     steps:
       - uses: actions/checkout@v4
@@ -30,15 +33,6 @@ jobs:
       - name: Setup MSBuild
         uses: microsoft/setup-msbuild@v2
 
-      - name: Cache vcpkg binary archives
-        uses: actions/cache@v4
-        with:
-          path: ${{ github.workspace }}\.vcpkg-cache
-          key: vcpkg-archives-${{ runner.os }}-${{ env.VCPKG_DEFAULT_TRIPLET }}-4b77da7fed37817f124936239197833469f1b9a8-${{ hashFiles('vcpkg.json', 'vcpkg-configuration.json') }}
-          restore-keys: |
-            vcpkg-archives-${{ runner.os }}-${{ env.VCPKG_DEFAULT_TRIPLET }}-4b77da7fed37817f124936239197833469f1b9a8-
-            vcpkg-archives-${{ runner.os }}-${{ env.VCPKG_DEFAULT_TRIPLET }}-
-
       - name: Setup vcpkg
         shell: pwsh
         run: |
@@ -48,8 +42,25 @@ jobs:
           .\bootstrap-vcpkg.bat
           .\vcpkg integrate install      
           
+      - name: Configure NuGet credentials for vcpkg binary caching
+        shell: pwsh
+        run: |
+          $nuget = & "$env:VCPKG_ROOT\vcpkg" fetch nuget | Select-Object -Last 1
+          & $nuget sources add `
+            -Name "GitHubPackages" `
+            -Source "https://nuget.pkg.github.com/${{ github.repository_owner }}/index.json" `
+            -Username "${{ github.actor }}" `
+            -Password "${{ secrets.GITHUB_TOKEN }}" `
+            -StorePasswordInClearText `
+            -NonInteractive
+          & $nuget setapikey "${{ secrets.GITHUB_TOKEN }}" `
+            -Source "https://nuget.pkg.github.com/${{ github.repository_owner }}/index.json" `
+            -NonInteractive
+
       - name: Install vcpkg packages
         shell: pwsh
+        env:
+          VCPKG_BINARY_SOURCES: "clear;nuget,https://nuget.pkg.github.com/${{ github.repository_owner }}/index.json,readwrite"
         run: |
           cd $env:VCPKG_ROOT
           .\vcpkg install --triplet $env:VCPKG_DEFAULT_TRIPLET --x-install-root=${{ github.workspace }}/vcpkg_installed
