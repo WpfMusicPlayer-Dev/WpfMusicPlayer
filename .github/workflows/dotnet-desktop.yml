@@ -1,0 +1,101 @@
+name: Build
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  build:
+    runs-on: windows-2025-vs2026
+    
+    permissions:
+      contents: read
+      packages: write
+
+    env:
+      VCPKG_ROOT: ${{ github.workspace }}/vcpkg
+      VCPKG_DEFAULT_TRIPLET: x64-windows
+
+    steps:
+      - uses: actions/checkout@v4
+    
+      - name: Print runner hardware info
+        shell: pwsh
+        run: |
+          $cpu = Get-CimInstance Win32_Processor
+          Write-Output "Hosted Runner Information:"
+          Write-Output "CPU Model: $($cpu.Name)"
+          Write-Output "Logical Processors: $($cpu.NumberOfLogicalProcessors)"
+          Write-Output "Physical Processors: $($cpu.NumberOfCores)"
+          $mem = Get-CimInstance Win32_ComputerSystem
+          Write-Output ("Memory Size (GB): {0:N2}" -f ($mem.TotalPhysicalMemory/1GB))
+
+      - name: Setup MSBuild
+        uses: microsoft/setup-msbuild@v2
+
+      - name: Setup vcpkg
+        shell: pwsh
+        run: |
+          git clone https://github.com/microsoft/vcpkg.git $env:VCPKG_ROOT
+          cd $env:VCPKG_ROOT
+          git checkout 4b77da7fed37817f124936239197833469f1b9a8
+          .\bootstrap-vcpkg.bat
+          .\vcpkg integrate install      
+          
+      - name: Configure NuGet credentials for vcpkg binary caching
+        shell: pwsh
+        run: |
+          $nuget = & "$env:VCPKG_ROOT\vcpkg" fetch nuget | Select-Object -Last 1
+          & $nuget sources add `
+            -Name "GitHubPackages" `
+            -Source "https://nuget.pkg.github.com/${{ github.repository_owner }}/index.json" `
+            -Username "${{ github.actor }}" `
+            -Password "${{ secrets.GITHUB_TOKEN }}" `
+            -StorePasswordInClearText `
+            -NonInteractive
+          & $nuget setapikey "${{ secrets.GITHUB_TOKEN }}" `
+            -Source "https://nuget.pkg.github.com/${{ github.repository_owner }}/index.json" `
+            -NonInteractive
+
+      - name: Install vcpkg packages
+        shell: pwsh
+        env:
+          VCPKG_BINARY_SOURCES: "clear;nuget,https://nuget.pkg.github.com/${{ github.repository_owner }}/index.json,readwrite"
+        run: |
+          cd $env:VCPKG_ROOT
+          .\vcpkg install --triplet $env:VCPKG_DEFAULT_TRIPLET --x-install-root=${{ github.workspace }}/vcpkg_installed
+
+      - name: Restore NuGet packages
+        run: >
+          msbuild WpfMusicPlayer.slnx
+          /t:Restore
+          /p:Platform=x64
+          /p:VcpkgRoot=$env:VCPKG_ROOT
+          /p:VcpkgInstalledDir=${{ github.workspace }}/vcpkg_installed
+
+      - name: Build solution
+        run: >
+          msbuild WpfMusicPlayer.slnx
+          /p:Configuration=Release
+          /p:Platform=x64
+          /p:VcpkgRoot=$env:VCPKG_ROOT
+          /p:VcpkgInstalledDir=${{ github.workspace }}/vcpkg_installed
+          
+      - name: Copy native build output to app output
+        shell: pwsh
+        run: |
+          $src  = Join-Path $env:GITHUB_WORKSPACE 'x64\Release'
+          $dest = Join-Path $env:GITHUB_WORKSPACE 'WpfMusicPlayer\bin\Release\net10.0-windows10.0.26100.0'
+
+          if (-not (Test-Path $src))  { throw "Source folder not found: $src" }
+          if (-not (Test-Path $dest)) { throw "Destination folder not found: $dest" }
+
+          Copy-Item -Path (Join-Path $src '*') -Destination $dest -Recurse -Force
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: wpf_music_player_ci_release
+          path: WpfMusicPlayer\bin\Release\net10.0-windows10.0.26100.0\**
+          if-no-files-found: error
+          retention-days: 7

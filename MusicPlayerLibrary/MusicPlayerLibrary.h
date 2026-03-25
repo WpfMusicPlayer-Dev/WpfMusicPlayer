@@ -34,13 +34,6 @@ namespace MusicPlayerLibrary {
 		WM_PLAYER_DESTROY = (WM_USER + 106)
 	};
 
-	public ref class Class1
-	{
-		// TODO: 在此处为此类添加方法。
-		public:
-			int Add(int a, int b);
-	};
-
 	public struct NcmMusicMeta
 	{
 		CString musicName;

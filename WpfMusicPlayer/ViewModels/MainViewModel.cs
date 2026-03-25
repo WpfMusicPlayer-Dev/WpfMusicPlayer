@@ -17,6 +17,7 @@ public class MainViewModel : ViewModelBase, IDisposable
     // 业务逻辑在这里写
     // 不要把业务逻辑写在View里！！！
     // 这里不要直接操作UI！！！
+    private readonly IConfigProvider _configProvider;
     private readonly IFileDialogService _fileDialogService;
     private readonly ISmtcService _smtcService;
     private readonly ISongDatabaseService _songDatabase;
@@ -29,8 +30,9 @@ public class MainViewModel : ViewModelBase, IDisposable
     private bool _enableAutoPlay;
     private GCLatencyMode _previousLatencyMode;
 
-    public MainViewModel(IFileDialogService fileDialogService, ISmtcService smtcService, ISongDatabaseService songDatabase)
+    public MainViewModel(IConfigProvider configProvider, IFileDialogService fileDialogService, ISmtcService smtcService, ISongDatabaseService songDatabase)
     {
+        _configProvider = configProvider;
         _fileDialogService = fileDialogService;
         _smtcService = smtcService;
         _songDatabase = songDatabase;
@@ -38,7 +40,7 @@ public class MainViewModel : ViewModelBase, IDisposable
         Equalizer = new EqualizerViewModel(ApplyEqualizerBand);
         _sampleRate = 48000; // Studio quality
         _musicPlayer = new MusicPlayer(_sampleRate);
-        
+
         SubscribePlayerEvents();
         SubscribeSmtcEvents();
 
@@ -295,7 +297,7 @@ public class MainViewModel : ViewModelBase, IDisposable
         _sampleRate = sampleRate;
         if (_currentFilePath != null)
         {
-            OpenFile( _currentFilePath );
+            OpenFile(_currentFilePath);
         }
     }
 

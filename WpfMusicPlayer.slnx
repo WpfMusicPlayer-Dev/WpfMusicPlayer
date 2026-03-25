@@ -6,5 +6,6 @@
     <Platform Name="x86" />
   </Configurations>
   <Project Path="MusicPlayerLibrary/MusicPlayerLibrary.vcxproj" />
+  <Project Path="WpfMusicPlayer.Test/WpfMusicPlayer.Test.csproj" Id="e52a393b-e3ca-4382-9c40-7142c9e091e6" />
   <Project Path="WpfMusicPlayer/WpfMusicPlayer.csproj" Id="fd4f29da-9a87-4cd4-a3bc-20f0eb0b7b03" />
 </Solution>

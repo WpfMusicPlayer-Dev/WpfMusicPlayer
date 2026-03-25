@@ -1,4 +1,4 @@
-﻿using System.ComponentModel;
+using System.ComponentModel;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
@@ -34,7 +34,7 @@ namespace WpfMusicPlayer
 
             InitializeComponent();
             var smtcService = new SmtcService();
-            DataContext = new MainViewModel(new FileDialogService(), smtcService, new SongDatabaseService());
+            DataContext = new MainViewModel(ConfigProvider.Render, new FileDialogService(), smtcService, new SongDatabaseService());
             AtlTraceRedirectManager.Init();
             SourceInitialized += (s, e) =>
             {
@@ -91,7 +91,7 @@ namespace WpfMusicPlayer
                 }, DispatcherPriority.Loaded);
                 return;
             }
-            
+
             if (e.PropertyName != nameof(MainViewModel.CurrentLyricIndex)) return;
 
             ScrollLyricToCenter(LandscapeLyricsView.LyricsList, index);
@@ -168,7 +168,7 @@ namespace WpfMusicPlayer
                 _layoutInitialized = true;
                 _isPortrait = shouldBePortrait;
                 LandscapeContent.Visibility = shouldBePortrait ? Visibility.Collapsed : Visibility.Visible;
-                PortraitContent.Visibility  = shouldBePortrait ? Visibility.Visible   : Visibility.Collapsed;
+                PortraitContent.Visibility = shouldBePortrait ? Visibility.Visible : Visibility.Collapsed;
                 PlayerToolbar.VolumePanelElement.Visibility = shouldBePortrait ? Visibility.Collapsed : Visibility.Visible;
                 return;
             }
@@ -329,12 +329,12 @@ namespace WpfMusicPlayer
             var outgoing = toPortrait ? LandscapeContent : PortraitContent;
 
             var outAlbum = toPortrait ? (FrameworkElement)LandscapeAlbumCover : PortraitAlbumCover;
-            var inAlbum  = toPortrait ? (FrameworkElement)PortraitAlbumCover  : LandscapeAlbumCover;
+            var inAlbum = toPortrait ? (FrameworkElement)PortraitAlbumCover : LandscapeAlbumCover;
 
-            var inAlbumTranslate  = toPortrait ? PortraitAlbumTranslate      : LandscapeAlbumTranslate;
-            var inAlbumScale      = toPortrait ? PortraitAlbumScale          : LandscapeAlbumScale;
-            var inSongTranslate   = toPortrait ? PortraitSongInfoTranslate   : PlayerToolbar.LandscapeSongInfoTranslate;
-            var inLyricsTranslate = toPortrait ? PortraitLyricsView.LyricsTranslate     : LandscapeLyricsView.LyricsTranslate;
+            var inAlbumTranslate = toPortrait ? PortraitAlbumTranslate : LandscapeAlbumTranslate;
+            var inAlbumScale = toPortrait ? PortraitAlbumScale : LandscapeAlbumScale;
+            var inSongTranslate = toPortrait ? PortraitSongInfoTranslate : PlayerToolbar.LandscapeSongInfoTranslate;
+            var inLyricsTranslate = toPortrait ? PortraitLyricsView.LyricsTranslate : LandscapeLyricsView.LyricsTranslate;
 
             ClearLayoutAnimations();
 

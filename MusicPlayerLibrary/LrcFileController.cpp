@@ -719,9 +719,8 @@ int LrcFileControllerNative::get_current_lrc_line_at(int index, CString& out_str
 
 int LrcFileControllerNative::get_lrc_line_at(int lrc_node_index, int index, CString& out_str) const
 {
-    assert(
-        lrc_node_index >= 0 && lrc_node_index < lrc_nodes.GetCount() && index >= 0 && index < lrc_nodes[lrc_node_index]
-        ->get_lrc_str_count());
+    if (lrc_node_index < 0 || lrc_node_index >= lrc_nodes.GetCount())
+        throw gcnew System::ArgumentOutOfRangeException("lrc_node_index out of range");
     return lrc_nodes[lrc_node_index]->get_lrc_str_at(index, out_str);
 }
 
@@ -732,7 +731,8 @@ int LrcFileControllerNative::get_current_lrc_line_aux_index(LrcAuxiliaryInfoNati
 
 int LrcFileControllerNative::get_lrc_line_aux_index(int lrc_node_index, LrcAuxiliaryInfoNative info) const
 {
-    assert(lrc_node_index >= 0 && lrc_node_index < lrc_nodes.GetCount());
+    if(lrc_node_index < 0 || lrc_node_index >= lrc_nodes.GetCount())
+        throw gcnew System::ArgumentOutOfRangeException("lrc_node_index out of range");
     return lrc_nodes[lrc_node_index]->get_auxiliary_info_at(info);
 }
 

@@ -8,5 +8,6 @@
   <Project Path="MusicPlayerLibrary/MusicPlayerLibrary.vcxproj">
     <Platform Solution="*|Any CPU" Project="ARM64" />
   </Project>
+  <Project Path="WpfMusicPlayer.Test/WpfMusicPlayer.Test.csproj" />
   <Project Path="WpfMusicPlayer/WpfMusicPlayer.csproj" Id="fd4f29da-9a87-4cd4-a3bc-20f0eb0b7b03" />
 </Solution>
