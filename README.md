@@ -1,4 +1,7 @@
-# WpfMusicPlayer
+<div align="center">
+  <img src="WpfMusicPlayer/Assets/ApplicationIcon.ico" alt="WpfMusicPlayer Icon" width="64" height="64"/>
+  <h2>WpfMusicPlayer</h2>
+</div>
 
 A simple music player.
 
@@ -31,3 +34,6 @@ TODO List:
 
 Author info:
 - Email: lucas150670@petalmail.com
+
+## Notice
+- the project icon was created by [白菜叶_](https://space.bilibili.com/1954890407). this icon is not free for use, and is not distributed under the main program's license.  any utilization, reproduction, modification, or distribution of the icon is strictly prohibited without the explicit written authorization of 白菜叶_ or lucas150670.
