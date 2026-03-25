@@ -327,6 +327,13 @@ void MusicPlayerLibrary::MusicPlayerNative::reset_audio_context()
 	if (is_audio_context_initialized()) {
 		stop_audio_decode();
 		av_seek_frame(format_context, static_cast<int>(audio_stream_index), 0, AVSEEK_FLAG_BACKWARD);
+		avcodec_flush_buffers(codec_context);
+		// 清除重采样上下文缓存
+		swr_convert(swr_ctx, nullptr, 0, nullptr, 0);
+		// 重置滤镜图
+		ATLTRACE("info: audio context reset, rebuilding filter graph\n");
+		reset_av_filter_equalizer();
+		init_av_filter_equalizer();
 	}
 	InterlockedExchange(playback_state, audio_playback_state_init);
 	reset_audio_fifo();
@@ -742,6 +749,7 @@ void MusicPlayerLibrary::MusicPlayerNative::audio_playback_worker_thread()
 	DWORD spinWaitResult;
 	double decode_time_ms = 0.0;
 	array<uint8_t>^ boxed_array;
+	bool swr_flushed = false;
 
 	while (true) {
 		decode_time_ms = 0.0;
@@ -788,11 +796,40 @@ void MusicPlayerLibrary::MusicPlayerNative::audio_playback_worker_thread()
 			// bypass
 		}
 		else if (!decoder_is_running && fifo_size == 0) {
-			// LeaveCriticalSection(audio_playback_section);
-			// all done
-			ATLTRACE("info: decoder stopped and fifo empty, ending playback thread\n");
-			InterlockedExchange(playback_state, audio_playback_state_decoder_exit_pre_stop);
-			continue;
+			if (!swr_flushed && swr_ctx) {
+				swr_flushed = true;
+				out_buffer_size = sizeof(uint8_t) * xaudio2_play_frame_size * wfx.nBlockAlign;
+
+				while (true) {
+					// reset out_buffer
+					delete[] out_buffer;
+					out_buffer = DBG_NEW uint8_t[out_buffer_size];
+					memset(out_buffer, 0, out_buffer_size);
+
+					// 冲洗swr_convert中最后的残留数据
+					int out_samples = swr_convert(swr_ctx, &out_buffer, xaudio2_play_frame_size, nullptr, 0);
+					if (out_samples <= 0) {
+						// all done!
+						break;
+					}
+
+					ATLTRACE("info: swr_convert flushed %d samples\n", out_samples);
+
+					// 将冲洗出的数据提交给XAudio2
+					XAUDIO2_BUFFER* buffer_pcm = xaudio2_get_available_buffer(out_samples * wfx.nBlockAlign);
+					buffer_pcm->AudioBytes = out_samples * wfx.nBlockAlign;
+					memcpy(const_cast<BYTE*>(buffer_pcm->pAudioData), out_buffer, buffer_pcm->AudioBytes);
+
+					if (FAILED(source_voice->SubmitSourceBuffer(buffer_pcm))) {
+						ATLTRACE("err: submit flushed source buffer failed\n");
+						break;
+					}
+				}
+
+				ATLTRACE("info: decoder stopped and fifo empty, ending playback thread\n");
+				InterlockedExchange(playback_state, audio_playback_state_decoder_exit_pre_stop);
+				continue;
+			}
 		}
 		// if (fifo_size < xaudio2_play_frame_size) {
 		// 	SetEvent(frame_underrun_event);
@@ -1055,6 +1092,9 @@ void MusicPlayerLibrary::MusicPlayerNative::audio_playback_worker_thread()
 
 void MusicPlayerLibrary::MusicPlayerNative::audio_decode_worker_thread()
 {
+	bool is_eof = false;
+	bool decoder_flushed = false;
+	bool filter_flushed = false;
 	while (true) {
 		// frame underrun, notify decoder to decode more frames
 		if (DWORD dw = WaitForSingleObject(frame_underrun_event, 1); dw != WAIT_OBJECT_0 && dw != WAIT_TIMEOUT) {
@@ -1079,8 +1119,12 @@ void MusicPlayerLibrary::MusicPlayerNative::audio_decode_worker_thread()
 			ATLTRACE("info: playback stopped, decoder thread exiting\n");
 			break;
 		}
-		if (file_stream_end) {
-			ATLTRACE("info: file stream ended, decoder thread exiting\n");
+
+		// 文件流终止时，还有样本留在滤镜中
+		// 删除file_stream_ended 改为判断滤镜是否完全排空
+		if (filter_flushed) {
+			ATLTRACE("info: decoder and filters completely flushed, decoder thread exiting\n");
+			file_stream_end = true;
 			break;
 		}
 
@@ -1091,14 +1135,25 @@ void MusicPlayerLibrary::MusicPlayerNative::audio_decode_worker_thread()
 				ATLTRACE("err: resume failed\n");
 				InterlockedExchange(playback_state, audio_playback_state_stopped);
 			}
+			avcodec_flush_buffers(codec_context);
 			is_pause = false;
+			is_eof = false;
+			decoder_flushed = false;
+			filter_flushed = false;
 		}
 
 		// 从输入文件中读取数据并解码
-		if (av_read_frame(format_context, packet) < 0) {
-			ATLTRACE("info: av_read_frame reached eof, decoder exiting\n");
-			// InterlockedExchange(playback_state, audio_playback_state_stopped);
-			break;
+		if (!is_eof) {
+			if (av_read_frame(format_context, packet) < 0) {
+				ATLTRACE("info: av_read_frame reached eof, entering flush mode\n");
+				// 文件流结束，进入flush模式
+				is_eof = true;
+			}
+			else if (packet->stream_index != audio_stream_index) {
+				SetEvent(frame_underrun_event);
+				av_packet_unref(packet);
+				continue; // 跳过非音频流包
+			}
 		}
 
 		if (packet->stream_index != audio_stream_index) {
@@ -1106,22 +1161,41 @@ void MusicPlayerLibrary::MusicPlayerNative::audio_decode_worker_thread()
 			av_packet_unref(packet);
 			continue; // skip non-audio packet
 		}
-		if (int ret = avcodec_send_packet(codec_context, packet); ret < 0) {
-			if (ret == AVERROR_INVALIDDATA)
-			{
-				// ignore bad block, continue
-				av_packet_unref(packet);
-				continue;
+		
+		if (is_eof && !decoder_flushed) {
+			// 发送空包以排空解码器缓存
+			int ret = avcodec_send_packet(codec_context, nullptr);
+			if (ret < 0 && ret != AVERROR_EOF) {
+				ATLTRACE("warn: flush decoder failed, code=%d\n", ret);
 			}
-			FFMPEG_CRITICAL_ERROR(ret);
-			InterlockedExchange(playback_state, audio_playback_state_stopped);
-			av_packet_unref(packet);
-			break;
+			decoder_flushed = true;
+		}
+		else if (!is_eof) {
+			// 正常送入数据包
+			if (int ret = avcodec_send_packet(codec_context, packet); ret < 0) {
+				if (ret == AVERROR_INVALIDDATA) {
+					// 忽略坏块
+					av_packet_unref(packet);
+					continue;
+				}
+				FFMPEG_CRITICAL_ERROR(ret);
+				InterlockedExchange(playback_state, audio_playback_state_stopped);
+				av_packet_unref(packet);
+				break;
+			}
 		}
 		while (true)
 		{
-			if (int res = avcodec_receive_frame(codec_context, frame); res == AVERROR(EAGAIN) || res == AVERROR_EOF) {
+			if (int res = avcodec_receive_frame(codec_context, frame); res == AVERROR(EAGAIN)) {
 				break; // 没有更多帧
+			}
+			else if (res == AVERROR_EOF) {
+				// 解码器彻底排空，向滤镜发送空帧触发滤镜排空
+				ATLTRACE("info: decoder flushed, sending empty frame to filter\n");
+				if (is_eof && !filter_flushed) {
+					av_buffersrc_add_frame(filter_context_src, nullptr);
+				}
+				break;
 			}
 			else if (res < 0) {
 				FFMPEG_CRITICAL_ERROR(res);
@@ -1130,9 +1204,14 @@ void MusicPlayerLibrary::MusicPlayerNative::audio_decode_worker_thread()
 			}
 			if (int ret_code = av_buffersrc_add_frame(filter_context_src, frame); ret_code < 0)
 			{
-				FFMPEG_CRITICAL_ERROR(ret_code);
-				InterlockedExchange(playback_state, audio_playback_state_stopped);
+				if (ret_code != AVERROR_EOF) { // 滤镜图已被永久关闭
+					FFMPEG_CRITICAL_ERROR(ret_code);
+				}
+				else {
+					ATLTRACE("info: filter shutdown, exiting\n");
+				}
 				// LeaveCriticalSection(audio_fifo_section);
+				InterlockedExchange(playback_state, audio_playback_state_stopped);
 				break;
 			}
 			CriticalSectionLock fifo_lock(audio_fifo_section);
@@ -1149,6 +1228,34 @@ void MusicPlayerLibrary::MusicPlayerNative::audio_decode_worker_thread()
 			// ATLTRACE("info: decoded frame nb_samples=%d, pts=%lld\n", frame->nb_samples, frame->pts);
 			// LeaveCriticalSection(audio_fifo_section);
 			av_frame_unref(frame);
+		}
+
+		// 进入EOF模式后，排空滤镜中的所有样本
+		if (is_eof && decoder_flushed && !filter_flushed) {
+			CriticalSectionLock fifo_lock(audio_fifo_section);
+			int flush_attempt = 0;
+			while (true) {
+				flush_attempt++;
+				ATLTRACE("info: %d attempt of flushing filter\n", flush_attempt);
+				int res = av_buffersink_get_frame(filter_context_sink, filt_frame);
+				if (res == AVERROR_EOF) {
+					// 滤镜彻底排空
+					ATLTRACE("info: filter flushed, all samples processed\n");
+					filter_flushed = true;
+					file_stream_end = true; // 触发播放线程去读完最后的 FIFO 数据
+					break;
+				}
+				else if (res == AVERROR(EAGAIN) || res < 0) {
+					break;
+				}
+
+				if (int ret_code = add_samples_to_fifo(filt_frame->extended_data, filt_frame->nb_samples); ret_code < 0) {
+					FFMPEG_CRITICAL_ERROR(ret_code);
+					InterlockedExchange(playback_state, audio_playback_state_stopped);
+					break;
+				}
+				av_frame_unref(filt_frame);
+			}
 		}
 
 		{
@@ -1174,7 +1281,10 @@ void MusicPlayerLibrary::MusicPlayerNative::audio_decode_worker_thread()
 			SetEvent(frame_ready_event);
 		}
 		av_frame_unref(frame); // eof, err process -> proper unref
-		av_packet_unref(packet);
+		if (!is_eof) {
+			// EOF模式时，发送的包是空包
+			av_packet_unref(packet);
+		}
 		clock_t decode_end = clock();
 		double decode_time_ms = (decode_end - decode_begin) * 1000.0 / CLOCKS_PER_SEC;
 		// this seems to be disrupting.
