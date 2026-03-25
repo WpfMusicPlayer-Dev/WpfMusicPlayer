@@ -305,6 +305,13 @@
                                  x:Name="SidebarMenuBottomList">
                             <ListBoxItem>
                                 <StackPanel Orientation="Horizontal">
+                                    <TextBlock Text="&#xE117;" FontFamily="Segoe MDL2 Assets" FontSize="16"
+                                               VerticalAlignment="Center" Margin="0,0,14,0" Foreground="White"/>
+                                    <TextBlock Text="重启" VerticalAlignment="Center" Foreground="White"/>
+                                </StackPanel>
+                            </ListBoxItem>
+                            <ListBoxItem>
+                                <StackPanel Orientation="Horizontal">
                                     <TextBlock Text="&#xE946;" FontFamily="Segoe MDL2 Assets" FontSize="16"
                                                VerticalAlignment="Center" Margin="0,0,14,0" Foreground="White"/>
                                     <TextBlock Text="关于 WpfMusicPlayer..." VerticalAlignment="Center" Foreground="White"/>

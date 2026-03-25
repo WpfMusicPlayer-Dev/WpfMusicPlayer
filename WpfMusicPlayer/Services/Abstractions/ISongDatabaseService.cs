@@ -1,6 +1,6 @@
 using WpfMusicPlayer.Models;
 
-namespace WpfMusicPlayer.Services;
+namespace WpfMusicPlayer.Services.Abstractions;
 
 public interface ISongDatabaseService : IDisposable
 {

@@ -1,7 +1,8 @@
 using LiteDB;
 using WpfMusicPlayer.Models;
+using WpfMusicPlayer.Services.Abstractions;
 
-namespace WpfMusicPlayer.Services;
+namespace WpfMusicPlayer.Services.Implementations;
 
 public class SongDatabaseService : ISongDatabaseService
 {

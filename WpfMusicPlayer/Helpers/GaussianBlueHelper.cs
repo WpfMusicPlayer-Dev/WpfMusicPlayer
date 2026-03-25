@@ -54,28 +54,6 @@ internal static class GaussianBlueHelper
         Acrylic = 3
     }
 
-    [DllImport("ntdll.dll")]
-    static extern int RtlGetVersion(ref OSVERSIONINFOEX versionInfo);
-
-    [StructLayout(LayoutKind.Sequential)]
-    public struct OSVERSIONINFOEX
-    {
-        public int dwOSVersionInfoSize;
-        public int dwMajorVersion;
-        public int dwMinorVersion;
-        public int dwBuildNumber;
-        public int dwPlatformId;
-        [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 128)]
-        public string szCSDVersion;
-    }
-
-    public static bool IsWindows11()
-    {
-        var v = new OSVERSIONINFOEX();
-        v.dwOSVersionInfoSize = Marshal.SizeOf(v);
-        RtlGetVersion(ref v);
-        return v is { dwMajorVersion: 10, dwBuildNumber: >= 22000 };
-    }
 
     public static void EnableDarkMode(Window window)
     {
@@ -88,7 +66,7 @@ internal static class GaussianBlueHelper
 
     public static void EnableAcrylic(Window window, uint tintColor = 0xCC222222)
     {
-        if (IsWindows11())
+        if (OsVersionHelper.IsWindows11())
             Win11_ApplyBackdrop(window, DwmSystemBackdropType.Acrylic);
         else
             Win10_ApplyBlur(window, tintColor);
@@ -96,7 +74,7 @@ internal static class GaussianBlueHelper
 
     public static void EnableSolid(Window window)
     {
-        if (IsWindows11())
+        if (OsVersionHelper.IsWindows11())
             Win11_ApplyBackdrop(window, DwmSystemBackdropType.None);
         else
             Win10_ApplySolid(window);
@@ -104,7 +82,7 @@ internal static class GaussianBlueHelper
 
     public static void EnableImageBlur(Window window)
     {
-        if (IsWindows11())
+        if (OsVersionHelper.IsWindows11())
             Win11_ApplyBackdrop(window, DwmSystemBackdropType.None);
         else
             Win10_ApplyImageBlur(window);

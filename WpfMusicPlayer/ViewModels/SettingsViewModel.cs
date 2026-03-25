@@ -1,6 +1,8 @@
 using System.Runtime.CompilerServices;
+using System.Windows;
+using WpfMusicPlayer.Helpers;
 using WpfMusicPlayer.Models;
-using WpfMusicPlayer.Services;
+using WpfMusicPlayer.Services.Abstractions;
 using static WpfMusicPlayer.Models.ConfigData;
 
 namespace WpfMusicPlayer.ViewModels;
@@ -64,6 +66,8 @@ public class SettingsViewModel : ViewModelBase
                 ApplyToConfig();
         }
     }
+
+    public Visibility Windows10WarningVisibility => OsVersionHelper.IsWindows11() ? Visibility.Collapsed : Visibility.Visible;
 
     public UISettings.ThemeMode[] ThemeOptions { get; } =
         Enum.GetValues<UISettings.ThemeMode>();

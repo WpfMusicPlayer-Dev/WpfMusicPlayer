@@ -6,8 +6,9 @@ using MusicPlayerLibrary;
 using Windows.Media;
 using Windows.Storage.Streams;
 using WinRT;
+using WpfMusicPlayer.Services.Abstractions;
 
-namespace WpfMusicPlayer.Services;
+namespace WpfMusicPlayer.Services.Implementations;
 
 public class SmtcService : ISmtcService
 {

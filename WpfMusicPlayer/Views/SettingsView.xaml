@@ -130,6 +130,10 @@
             <TextBlock Text="设置" Foreground="White" FontSize="24" FontWeight="SemiBold" Margin="0,0,0,24"/>
 
             <TextBlock Text="界面" Foreground="#0078D7" FontSize="15" FontWeight="SemiBold" Margin="0,0,0,14"/>
+            <TextBlock 
+                        x:Name="NonWindows11Warning"
+                        Visibility="{Binding Windows10WarningVisibility}"
+                        Text="注意：由于Windows 10 DWM管线热切换存在bug，您需要重新启动应用程序以使更改生效" Foreground="#FFFFE0" FontSize="12" FontWeight="Bold" Margin="0,0,0,14" TextWrapping="Wrap"/>
 
             <Grid Margin="0,0,0,14">
                 <Grid.ColumnDefinitions>

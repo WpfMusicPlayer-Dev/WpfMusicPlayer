@@ -2,9 +2,10 @@ using System.IO;
 using System.Reflection;
 using System.Xml.Serialization;
 using WpfMusicPlayer.Models;
+using WpfMusicPlayer.Services.Abstractions;
 using static WpfMusicPlayer.Models.ConfigData;
 
-namespace WpfMusicPlayer.Services
+namespace WpfMusicPlayer.Services.Implementations
 {
     public class ConfigProvider : IConfigProvider
     {

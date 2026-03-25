@@ -8,6 +8,7 @@ using System.Windows.Threading;
 using MusicPlayerLibrary;
 using WpfMusicPlayer.Helpers;
 using WpfMusicPlayer.Services;
+using WpfMusicPlayer.Services.Implementations;
 using WpfMusicPlayer.ViewModels;
 using WpfMusicPlayer.Views;
 using static WpfMusicPlayer.Models.ConfigData;
@@ -25,6 +26,7 @@ namespace WpfMusicPlayer
         private TranslateTransform PortraitSongInfoTranslate => (TranslateTransform)PortraitSongInfoView.RenderTransform;
         private bool _isSidebarOpen;
         private bool _isEqualizerOpen;
+        private bool _backgroundInitialized;
         private DecodingDialog? _decodingDialog;
 
         public MainWindow()
@@ -36,7 +38,7 @@ namespace WpfMusicPlayer
 
             InitializeComponent();
             var smtcService = new SmtcService();
-            DataContext = new MainViewModel(ConfigProvider.Reader, new FileDialogService(), smtcService, new SongDatabaseService());
+            DataContext = new MainViewModel(ConfigProvider.Reader, new FileDialogService(), smtcService, new SongDatabaseService(), new CommandLineParser());
             AtlTraceRedirectManager.Init();
             SourceInitialized += (s, e) =>
             {
@@ -45,31 +47,52 @@ namespace WpfMusicPlayer
                 OnSourceInitialized(s, e);
             };
             ViewModel.PropertyChanged += ViewModel_PropertyChanged;
+
+            if (ViewModel.ActiveView != ActiveView.Player)
+            {
+                _previousView = ViewModel.ActiveView;
+                LandscapeContent.Visibility = Visibility.Collapsed;
+                GetViewElement(ViewModel.ActiveView).Visibility = Visibility.Visible;
+            }
         }
 
         private void ApplyBackgroundMode(UISettings.BackgroundMode mode)
         {
-            switch (mode)
+            if (OsVersionHelper.IsWindows11() || !_backgroundInitialized)
             {
-                case UISettings.BackgroundMode.Solid:
-                    GaussianBlueHelper.EnableSolid(this);
-                    BackgroundImageBorder.Visibility = Visibility.Collapsed;
-                    // byd 这里开了Black就会把标题栏一起渲染成黑的
-                    Background = Brushes.Transparent;
-                    break;
+                switch (mode)
+                {
+                    case UISettings.BackgroundMode.Solid:
+                        GaussianBlueHelper.EnableSolid(this);
+                        BackgroundImageBorder.Visibility = Visibility.Collapsed;
+                        // byd 这里开了Black就会把标题栏一起渲染成黑的
+                        Background = Brushes.Transparent;
+                        break;
 
-                case UISettings.BackgroundMode.Acrylic:
-                    BackgroundImageBorder.Visibility = Visibility.Collapsed;
-                    Background = Brushes.Transparent;
-                    GaussianBlueHelper.EnableAcrylic(this);
-                    break;
+                    case UISettings.BackgroundMode.Acrylic:
+                        BackgroundImageBorder.Visibility = Visibility.Collapsed;
+                        Background = Brushes.Transparent;
+                        GaussianBlueHelper.EnableAcrylic(this);
+                        break;
 
-                case UISettings.BackgroundMode.ImageBlur:
-                    GaussianBlueHelper.EnableImageBlur(this);
-                    BackgroundImageBorder.Visibility = Visibility.Visible;
-                    Background = Brushes.Transparent;
-                    break;
+                    case UISettings.BackgroundMode.ImageBlur:
+                        GaussianBlueHelper.EnableImageBlur(this);
+                        BackgroundImageBorder.Visibility = Visibility.Visible;
+                        Background = Brushes.Transparent;
+                        break;
+                }
+            } 
+            else
+            {
+                // Windows 10: need restart the whole application
+                WpfMessageBoxResult selection =
+                    WpfMessageBox.Show("您需要重启以应用设置更改吗？", "应用背景设置", WpfMessageBoxButton.OKCancel, WpfMessageBoxIcon.Information);
+                if (selection == WpfMessageBoxResult.OK)
+                {
+                    RebootApplicationHelper.RebootApplication();
+                }
             }
+            _backgroundInitialized = true;
         }
 
         private void OnSourceInitialized(object? sender, EventArgs e)
@@ -200,8 +223,11 @@ namespace WpfMusicPlayer
             {
                 _layoutInitialized = true;
                 _isPortrait = shouldBePortrait;
-                LandscapeContent.Visibility = shouldBePortrait ? Visibility.Collapsed : Visibility.Visible;
-                PortraitContent.Visibility = shouldBePortrait ? Visibility.Visible : Visibility.Collapsed;
+                if (ViewModel.ActiveView == ActiveView.Player)
+                {
+                    LandscapeContent.Visibility = shouldBePortrait ? Visibility.Collapsed : Visibility.Visible;
+                    PortraitContent.Visibility = shouldBePortrait ? Visibility.Visible : Visibility.Collapsed;
+                }
                 PlayerToolbar.VolumePanelElement.Visibility = shouldBePortrait ? Visibility.Collapsed : Visibility.Visible;
                 return;
             }
@@ -685,7 +711,13 @@ namespace WpfMusicPlayer
 
             switch (index)
             {
-                case 0: // About
+                case 0: // Reboot
+                    if (WpfMessageBox.Show("您确定要重启应用吗？", "重启应用", WpfMessageBoxButton.OKCancel, WpfMessageBoxIcon.Question) == WpfMessageBoxResult.OK)
+                    {
+                        RebootApplicationHelper.RebootApplication();
+                    }
+                    break;
+                case 1: // About
                     WpfMessageBox.Show(
                         "今日は魔法にかかったメイド\nささやかな晴れ舞台", // 大爱MIMI！
                         "关于 WpfMusicPlayer...",

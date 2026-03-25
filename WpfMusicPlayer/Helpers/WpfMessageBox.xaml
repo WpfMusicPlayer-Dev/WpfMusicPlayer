@@ -40,7 +40,6 @@
         </Style>
     </Window.Resources>
 
-    <!-- Outer shadow wrapper -->
     <Border Margin="24" CornerRadius="8" Background="#E6202020"
             BorderBrush="#40FFFFFF" BorderThickness="1">
         <Border.Effect>
@@ -53,9 +52,7 @@
                 <RowDefinition Height="Auto"/>
             </Grid.RowDefinitions>
 
-            <!-- Content area -->
             <StackPanel Grid.Row="0" Margin="24,24,24,16">
-                <!-- Icon -->
                 <TextBlock x:Name="IconText"
                            FontFamily="Segoe MDL2 Assets"
                            FontSize="28"
@@ -63,7 +60,6 @@
                            Margin="0,0,0,16"
                            Visibility="Collapsed"/>
 
-                <!-- Title -->
                 <TextBlock x:Name="TitleText"
                            FontSize="18"
                            FontWeight="SemiBold"
@@ -71,7 +67,6 @@
                            TextWrapping="Wrap"
                            Margin="0,0,0,8"/>
 
-                <!-- Message -->
                 <TextBlock x:Name="MessageText"
                            FontSize="14"
                            Foreground="#CCCCCC"
@@ -79,20 +74,12 @@
                            LineHeight="22"/>
             </StackPanel>
 
-            <!-- Button bar -->
             <Border Grid.Row="1"
                     Background="#18FFFFFF"
                     CornerRadius="0,0,8,8"
                     Padding="24,16">
-                <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
-                    <Button x:Name="OkButton"
-                            Content="OK"
-                            Background="#0078D7"
-                            Foreground="White"
-                            Style="{StaticResource DialogButtonStyle}"
-                            Click="OkButton_Click"
-                            IsDefault="True"/>
-                </StackPanel>
+                <!-- 更换OKButton为面板，方便添加更多按钮 -->
+                <StackPanel x:Name="ButtonPanel" Orientation="Horizontal" HorizontalAlignment="Right"/>
             </Border>
         </Grid>
     </Border>

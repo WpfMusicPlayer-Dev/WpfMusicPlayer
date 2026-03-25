@@ -8,7 +8,7 @@ using System.Windows.Input;
 using System.Windows.Media.Imaging;
 using WpfMusicPlayer.Helpers;
 using WpfMusicPlayer.Models;
-using WpfMusicPlayer.Services;
+using WpfMusicPlayer.Services.Abstractions;
 using static WpfMusicPlayer.Models.ConfigData;
 
 namespace WpfMusicPlayer.ViewModels;
@@ -24,6 +24,7 @@ public class MainViewModel : ViewModelBase, IDisposable
     private readonly IFileDialogService _fileDialogService;
     private readonly ISmtcService _smtcService;
     private readonly ISongDatabaseService _songDatabase;
+    private readonly ICommandLineParser _commandLineParser;
     private readonly SynchronizationContext _syncContext;
     private MusicPlayer _musicPlayer;
     private string? _currentFilePath;
@@ -31,14 +32,17 @@ public class MainViewModel : ViewModelBase, IDisposable
     private LrcFileController? _lrcFileController;
     private int _sampleRate;
     private bool _enableAutoPlay;
+    private float? _pendingSeekTime;
     private GCLatencyMode _previousLatencyMode;
+    private bool _isRestoredFromCommandLine;
 
-    public MainViewModel(IConfigProvider configProvider, IFileDialogService fileDialogService, ISmtcService smtcService, ISongDatabaseService songDatabase)
+    public MainViewModel(IConfigProvider configProvider, IFileDialogService fileDialogService, ISmtcService smtcService, ISongDatabaseService songDatabase, ICommandLineParser commandLineParser)
     {
         _configProvider = configProvider;
         _fileDialogService = fileDialogService;
         _smtcService = smtcService;
         _songDatabase = songDatabase;
+        _commandLineParser = commandLineParser;
         _syncContext = SynchronizationContext.Current!;
         Equalizer = new EqualizerViewModel(ApplyEqualizerBand);
         Settings = new SettingsViewModel(configProvider);
@@ -49,6 +53,7 @@ public class MainViewModel : ViewModelBase, IDisposable
 
         SubscribePlayerEvents();
         SubscribeSmtcEvents();
+        RestoreSettingsFromCommandLine();
 
         PlayPauseCommand = new RelayCommand(OnPlayPause, () => !IsDecoding);
         OpenCommand = new RelayCommand(async () => await OnOpenAsync());
@@ -58,6 +63,40 @@ public class MainViewModel : ViewModelBase, IDisposable
         PlaylistCommand = new RelayCommand(OnTogglePlaylist);
         TranslateCommand = new RelayCommand(OnToggleTranslation, () => HasTranslationAvailable);
         RomanjiCommand = new RelayCommand(OnToggleRomanji, () => HasRomanjiAvailable);
+    }
+
+    private void RestoreSettingsFromCommandLine()
+    {
+        Volume = _commandLineParser.Volume;
+
+        if (string.IsNullOrEmpty(_commandLineParser.FilePath))
+        {
+            ActiveView = _commandLineParser.StartupView;
+            return;
+        }
+
+        IsTranslationVisible = _commandLineParser.TranslationToggled;
+        IsRomanjiVisible = _commandLineParser.RomanjiToggled;
+
+        if (_commandLineParser.AppliedEqualizerSettings.Length > 0)
+        {
+            for (var i = 0; i < _commandLineParser.AppliedEqualizerSettings.Length && i < Equalizer.Bands.Count; i++)
+            {
+                Equalizer.Bands[i].Value = _commandLineParser.AppliedEqualizerSettings[i];
+            }
+        }
+
+        _enableAutoPlay = _commandLineParser.AutoStart;
+        if (_commandLineParser.MusicCurrentTime > 0)
+            _pendingSeekTime = _commandLineParser.MusicCurrentTime;
+
+        ActiveView = _commandLineParser.StartupView;
+        if (ActiveView != ActiveView.Player)
+        {
+            _isRestoredFromCommandLine = true;
+        }
+
+        OpenFile(_commandLineParser.FilePath);
     }
 
     public EqualizerViewModel Equalizer { get; }
@@ -191,6 +230,12 @@ public class MainViewModel : ViewModelBase, IDisposable
         private set => SetProperty(ref field, value);
     }
 
+    // for RebootApplication to build command line args
+    public bool IsMusicPlaying
+    {
+        get => _musicPlayer.IsPlaying();
+    }
+
     public ICommand PlayPauseCommand { get; }
     public ICommand OpenCommand { get; }
     public ICommand PrevCommand { get; }
@@ -202,8 +247,13 @@ public class MainViewModel : ViewModelBase, IDisposable
 
     public void OpenFile(string filePath)
     {
-        if (ActiveView != ActiveView.Player)
+        if (ActiveView != ActiveView.Player
+            && ActiveView != ActiveView.Playlist
+            && !_isRestoredFromCommandLine)
+        {
+            _isRestoredFromCommandLine = false;
             _syncContext.Send(_ => ActiveView = ActiveView.Player, null);
+        }
 
 
         var isNcm = Path.GetExtension(filePath).Equals(".ncm", StringComparison.OrdinalIgnoreCase);
@@ -393,6 +443,14 @@ public class MainViewModel : ViewModelBase, IDisposable
             _musicPlayer.SetMasterVolume((float)Volume);
 
             LoadLyrics();
+            if (_pendingSeekTime is { } seekTime)
+            {
+                _pendingSeekTime = null;
+                _musicPlayer.SeekToPosition(seekTime, true);
+                ProgressValue = seekTime;
+                CurrentTime = FormatTime(seekTime);
+                UpdateLyricProgress(seekTime);
+            }
             if (_enableAutoPlay)
                 _musicPlayer.Start();
         }, null);
@@ -433,8 +491,7 @@ public class MainViewModel : ViewModelBase, IDisposable
                 }
 
                 var playlistItem = PlaylistItems.FirstOrDefault(p => p.FilePath == _currentFilePath);
-                if (playlistItem != null)
-                    playlistItem.AlbumCover = AlbumCoverImage;
+                playlistItem?.AlbumCover = AlbumCoverImage;
 
                 Stream? stream = null;
                 if (AlbumCoverImage is not null && cached?.AlbumArt is { Length: > 0 })
@@ -776,7 +833,8 @@ public class MainViewModel : ViewModelBase, IDisposable
         if (PlaylistItems.All(p => p.FilePath != _currentFilePath))
         {
             PlaylistItems.Add(new PlaylistItemViewModel(
-                _currentFilePath, SongTitle, ArtistName, TotalTime));
+                _currentFilePath, SongTitle, ArtistName, TotalTime)
+            { AlbumCover = AlbumCoverImage });
         }
         foreach (var item in PlaylistItems)
             item.IsPlaying = item.FilePath == _currentFilePath;
