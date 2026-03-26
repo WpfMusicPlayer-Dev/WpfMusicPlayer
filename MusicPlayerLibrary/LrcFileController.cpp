@@ -576,40 +576,47 @@ void LrcFileControllerNative::parse_lrc_file_stream(CFile* file_stream)
             ATLTRACE(_T("warn: invalid lrc format, ignoring start character: %s\n"), line.Left(line_start_index).GetString());
             line = line.Right(line.GetLength() - line_start_index);
         }
-        if (flag_decoding_metadata)
-        {
+
+        // fix: moving decode_metadata as a lambda
+        auto decode_metadata = [](const CString& line, decltype(metadata)& meta, int& offset) -> int {
             // 走metadata解析，不遵守标准lrc解码
             switch (get_metadata_type(line))
             {
-            case LrcMetadataType::Artist:
-                metadata.artist = get_metadata_value(line);
+            case LrcMetadataTypeNative::Artist:
+                meta.artist = get_metadata_value(line);
                 break;
-            case LrcMetadataType::Album:
-                metadata.album = get_metadata_value(line);
+            case LrcMetadataTypeNative::Album:
+                meta.album = get_metadata_value(line);
                 break;
-            case LrcMetadataType::Title:
-                metadata.title = get_metadata_value(line);
+            case LrcMetadataTypeNative::Title:
+                meta.title = get_metadata_value(line);
                 break;
-            case LrcMetadataType::By:
-                metadata.by = get_metadata_value(line);
+            case LrcMetadataTypeNative::By:
+                meta.by = get_metadata_value(line);
                 break;
-            case LrcMetadataType::Offset:
-                lrc_offset_ms = _ttoi(get_metadata_value(line));
+            case LrcMetadataTypeNative::Offset:
+                offset = _ttoi(get_metadata_value(line));
                 break;
-            case LrcMetadataType::Author:
-                metadata.author = get_metadata_value(line);
+            case LrcMetadataTypeNative::Author:
+                meta.author = get_metadata_value(line);
                 break;
-            case LrcMetadataType::Ignored:
+            case LrcMetadataTypeNative::Ignored:
                 break;
-            case LrcMetadataType::Error: default:
-                flag_decoding_metadata = 0;
-                break;
+            case LrcMetadataTypeNative::Error: default:
+                return -1;
             }
-            if (flag_decoding_metadata)
+            return 0;
+        };
+        if (flag_decoding_metadata)
+        {
+            if (decode_metadata(line, metadata, lrc_offset_ms) == 0)
             {
                 start = end + 1;
-                continue;
             }
+            else {
+                flag_decoding_metadata = false;
+            }
+            continue;
         }
         // 解析时间tag
         if (line.GetLength() < 10)
@@ -624,11 +631,17 @@ void LrcFileControllerNative::parse_lrc_file_stream(CFile* file_stream)
         while (lyric_text.GetLength() > 0 && lyric_text[0] == '[')
         {
             int time_tag_end_index_multi = lyric_text.Find(']');
-            if (time_tag_end_index_multi == -1 || lyric_text[0] != '[' || lyric_text[3] != ':' || 
-                (lyric_text[6] != '.' && lyric_text[6] != ':'))
+            bool is_malformed_time_tag = time_tag_end_index_multi == -1 || lyric_text[0] != '[' || lyric_text[3] != ':' || 
+                (lyric_text[6] != '.' && lyric_text[6] != ':');
+            if (is_malformed_time_tag)
             {
-                clear_lrc_nodes();
-                throw gcnew System::InvalidOperationException("Invalid lrc time tag, aborting!");
+                // malformed time tag
+                // guess: metadata tag?
+                // fix issue #12
+                auto metadata_substr = lyric_text.Left(time_tag_end_index_multi + 1);
+                decode_metadata(metadata_substr, metadata, lrc_offset_ms);
+                lyric_text = lyric_text.Mid(time_tag_end_index_multi + 1).Trim();
+                continue;
             }
             int minutes = _ttoi(lyric_text.Mid(1, 2));
             int seconds = _ttoi(lyric_text.Mid(4, 2));
@@ -646,6 +659,11 @@ void LrcFileControllerNative::parse_lrc_file_stream(CFile* file_stream)
         }
         if (time_stamps.empty())
             throw gcnew System::InvalidOperationException("Invalid lrc time tag, aborting!");
+        if (lyric_text.IsEmpty()) {
+            // move to next line
+            start = end + 1;
+            continue;
+        }
         for (int time_stamp : time_stamps) 
             time_lines.push_back({ time_stamp, lyric_text });
 
@@ -753,29 +771,53 @@ int LrcFileControllerNative::get_lrc_line_aux_index(int lrc_node_index, LrcAuxil
     return lrc_nodes[lrc_node_index]->get_auxiliary_info_at(info);
 }
 
-LrcMetadataType LrcFileControllerNative::get_metadata_type(const CString& str)
+int MusicPlayerLibrary::LrcFileControllerNative::get_metadata_info(LrcMetadataTypeNative metadata_type, CString& out_str) const
+{
+    switch (metadata_type) {
+    case LrcMetadataTypeNative::Album:
+        out_str = metadata.album;
+        break;
+    case LrcMetadataTypeNative::Artist:
+        out_str = metadata.artist;
+        break;
+    case LrcMetadataTypeNative::Title:
+        out_str = metadata.title;
+        break;
+    case LrcMetadataTypeNative::By:
+        out_str = metadata.by;
+        break;
+    case LrcMetadataTypeNative::Author:
+        out_str = metadata.author;
+        break;
+    default:
+        return -1;
+    }
+    return 0;
+}
+
+LrcMetadataTypeNative LrcFileControllerNative::get_metadata_type(const CString& str)
 {
     if (str.IsEmpty() || str.GetLength() < 3 || str[0] != '[')
     {
-        return LrcMetadataType::Error;
+        return LrcMetadataTypeNative::Error;
     }
     // 逐字歌词有可能每个单位后都带有时间戳
     if (str.Find(']') != str.GetLength() - 1)
-        return LrcMetadataType::Error;
+        return LrcMetadataTypeNative::Error;
     int metadata_end_index = str.Find(':', 1);
     if (metadata_end_index == -1)
-        return LrcMetadataType::Error;
+        return LrcMetadataTypeNative::Error;
 
     switch (CString metadata_type_str = str.Left(metadata_end_index).Mid(1);
         cstring_hash_fnv_64bit_int(metadata_type_str))
     {
-    case 0x645d220c: return LrcMetadataType::Artist;
-    case 0x63d58dce: return LrcMetadataType::Album;
-    case 0x0387b4f0: return LrcMetadataType::Title;
-    case 0x27a9be4e: return LrcMetadataType::By;
-    case 0x4f6518ce: return LrcMetadataType::Offset;
-    case 0x642cb63f: return LrcMetadataType::Author;
-    default: return LrcMetadataType::Ignored;
+    case 0x645d220c: return LrcMetadataTypeNative::Artist;
+    case 0x63d58dce: return LrcMetadataTypeNative::Album;
+    case 0x0387b4f0: return LrcMetadataTypeNative::Title;
+    case 0x27a9be4e: return LrcMetadataTypeNative::By;
+    case 0x4f6518ce: return LrcMetadataTypeNative::Offset;
+    case 0x642cb63f: return LrcMetadataTypeNative::Author;
+    default: return LrcMetadataTypeNative::Ignored;
     }
 }
 
@@ -813,6 +855,21 @@ static LrcAuxiliaryInfoNative ToNativeAuxInfo(LrcAuxiliaryInfo info)
     case LrcAuxiliaryInfo::Romanization:   return LrcAuxiliaryInfoNative::Romanization;
     case LrcAuxiliaryInfo::Ignored:        return LrcAuxiliaryInfoNative::Ignored;
     default:                               return LrcAuxiliaryInfoNative::Ignored;
+    }
+}
+
+static LrcMetadataTypeNative ToNativeMetadataType(LrcMetadataType type)
+{
+    switch (type)
+    {
+    case LrcMetadataType::Title:     return LrcMetadataTypeNative::Title;
+    case LrcMetadataType::Ignored:   return LrcMetadataTypeNative::Ignored;
+    case LrcMetadataType::Artist:    return LrcMetadataTypeNative::Artist;
+    case LrcMetadataType::Album:     return LrcMetadataTypeNative::Album;
+    case LrcMetadataType::Author:    return LrcMetadataTypeNative::Author;
+    case LrcMetadataType::By:        return LrcMetadataTypeNative::By;
+    case LrcMetadataType::Offset:    return LrcMetadataTypeNative::Offset;
+    default:                         return LrcMetadataTypeNative::Error;
     }
 }
 
@@ -939,6 +996,16 @@ int LrcFileController::GetLrcLineAuxIndex(int lrcNodeIndex, LrcAuxiliaryInfo inf
 {
     check_if_null();
     return native_handle->get_lrc_line_aux_index(lrcNodeIndex, ToNativeAuxInfo(info));
+}
+
+System::String^ MusicPlayerLibrary::LrcFileController::GetMetadataInfo(LrcMetadataType type)
+{
+    check_if_null();
+    CString out_str;
+    int result = native_handle->get_metadata_info(ToNativeMetadataType(type), out_str);
+    if (result != 0)
+        return nullptr;
+    return msclr::interop::marshal_as<System::String^>(out_str.GetString());
 }
 
 bool LrcFileController::IsAuxiliaryInfoEnabled(LrcAuxiliaryInfo enableInfo)
