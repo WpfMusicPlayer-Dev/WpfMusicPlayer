@@ -323,7 +323,22 @@ public sealed class LrcFileControllerTest
     }
 
     #endregion
-    
+
+    #region Metadata Info
+
+    [TestMethod]
+    public void ParseLrcStream_GetMetadataInfo()
+    {
+        using var ctrl = CreateFromStream(SimpleLrc);
+
+        Assert.AreEqual("TestArtist", ctrl.GetMetadataInfo(LrcMetadataType.Artist));
+        Assert.AreEqual("TestTitle", ctrl.GetMetadataInfo(LrcMetadataType.Title));
+        Assert.AreEqual("TestAlbum", ctrl.GetMetadataInfo(LrcMetadataType.Album));
+        Assert.AreEqual("TestBy", ctrl.GetMetadataInfo(LrcMetadataType.By));
+    }
+
+    #endregion
+
     #region Disordered & Multiple Time Stamp Handling
 
     [TestMethod]
@@ -359,11 +374,30 @@ public sealed class LrcFileControllerTest
         Assert.AreEqual(27120, CreateFromStream(lrc).GetLrcNodeTimeMs(0));
         Assert.AreEqual(30870, CreateFromStream(lrc).GetLrcNodeTimeMs(1));
         Assert.AreEqual(34290, CreateFromStream(lrc).GetLrcNodeTimeMs(2));
-        Assert.AreEqual(true, CreateFromStream(lrc).IsAuxiliaryInfoEnabled(LrcAuxiliaryInfo.Translation));
+        Assert.IsTrue(CreateFromStream(lrc).IsAuxiliaryInfoEnabled(LrcAuxiliaryInfo.Translation));
         Assert.AreEqual(1, CreateFromStream(lrc).GetLrcLineAuxIndex(0, LrcAuxiliaryInfo.Translation));
         Assert.AreEqual(1, CreateFromStream(lrc).GetLrcLineAuxIndex(1, LrcAuxiliaryInfo.Translation));
         Assert.AreEqual(1, CreateFromStream(lrc).GetLrcLineAuxIndex(2, LrcAuxiliaryInfo.Translation));
     }
+
+    #region Malformed Time Tag Testing
+
+    [TestMethod]
+    public void ParseLrcStream_MalformedTimeTag_MetadataParsing()
+    {
+        const string lrc = """
+                           [00:00.000]作词 : MIMI
+                           [00:00.000][by:gurantouw]
+                           [00:00.000][al:MIMI]
+                           [00:00.211]作曲 : MIMI
+                           [00:00.211][ar:MIMI]
+                           """;
+        Assert.AreEqual("gurantouw", CreateFromStream(lrc).GetMetadataInfo(LrcMetadataType.By));
+        Assert.AreEqual("MIMI", CreateFromStream(lrc).GetMetadataInfo(LrcMetadataType.Album));
+        Assert.AreEqual("MIMI", CreateFromStream(lrc).GetMetadataInfo(LrcMetadataType.Artist));
+    }
+
+    #endregion
 
     #region Error handling
 
