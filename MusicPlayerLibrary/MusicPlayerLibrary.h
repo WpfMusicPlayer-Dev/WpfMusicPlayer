@@ -2,6 +2,7 @@
 
 #include "AtlTraceRedirect.h"
 #include <vcclr.h>
+#include "FFTExecuter.h"
 using namespace System;
 
 namespace MusicPlayerLibrary {
@@ -212,8 +213,8 @@ namespace MusicPlayerLibrary {
 		size_t get_samples_played_per_session();
 	public:
 		// using WriteRawPCMBytesCallback = std::function<void(const uint8_t* buffer_out, int buffer_size)>;
+		FFTExecuter* fft_executer = nullptr;
 	protected:
-		gcroot<WriteRawPCMBytesCallback^> write_raw_pcm_bytes_callback;
 
 		// debug function
 		void dialog_ffmpeg_critical_error(int err_code, const char* file, int line);
@@ -262,11 +263,6 @@ namespace MusicPlayerLibrary {
 		void SetSampleRate(int sample_rate);
 		// int GetRawPCMBytes(uint8_t* buffer_out, int buffer_size) const;
 
-		// WritePCMBytesCallback:
-		// uint8_t* out: provided by MusicPlayer, out_buffer
-		// int buffer_size: provided by MusicPlayer, actual written bytes
-		void RegisterWritePCMBytesCallback(WriteRawPCMBytesCallback^ callback);
-		void ClearWritePCMBytesCallback();
 		int GetNBlockAlign();
 		CString GetID3Lyric();
 
@@ -341,13 +337,11 @@ namespace MusicPlayerLibrary {
 		void SeekToPosition(float time, bool need_stop);
 		// int GetRawPCMBytes(uint8_t* buffer_out, int buffer_size) const;
 
-		// WritePCMBytesCallback:
-		// uint8_t* out: provided by MusicPlayer, out_buffer
-		// int buffer_size: provided by MusicPlayer, actual written bytes
-		void RegisterWritePCMBytesCallback(WriteRawPCMBytesCallback^ callback);
-		void ClearWritePCMBytesCallback();
 		int GetNBlockAlign();
 		System::String^ GetID3Lyric();
+
+		// FFT spectrum data
+		array<float>^ GetAudioFFTData();
 
 		// Equalizer interfaces
 		int GetEqualizerBand(int index);

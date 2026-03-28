@@ -1,0 +1,212 @@
+<UserControl x:Class="WpfMusicPlayer.Views.SettingsView"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="clr-namespace:WpfMusicPlayer.ViewModels">
+    <UserControl.Resources>
+        <Style x:Key="SettingsComboBoxStyle" TargetType="ComboBox">
+            <Setter Property="Background" Value="#30FFFFFF"/>
+            <Setter Property="Foreground" Value="White"/>
+            <Setter Property="BorderBrush" Value="#40FFFFFF"/>
+            <Setter Property="BorderThickness" Value="1"/>
+            <Setter Property="Padding" Value="10,6"/>
+            <Setter Property="MinWidth" Value="160"/>
+            <Setter Property="FontSize" Value="13"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="ComboBox">
+                        <Grid>
+                            <Border x:Name="Border" Background="{TemplateBinding Background}"
+                                    BorderBrush="{TemplateBinding BorderBrush}"
+                                    BorderThickness="{TemplateBinding BorderThickness}"
+                                    CornerRadius="4" Padding="{TemplateBinding Padding}">
+                                <Grid>
+                                    <ContentPresenter IsHitTestVisible="False"
+                                                      Content="{TemplateBinding SelectionBoxItem}"
+                                                      ContentTemplate="{TemplateBinding SelectionBoxItemTemplate}"
+                                                      VerticalAlignment="Center" HorizontalAlignment="Left"/>
+                                    <TextBlock Text="&#xE70D;" FontFamily="Segoe MDL2 Assets" FontSize="10"
+                                               Foreground="#AAFFFFFF" HorizontalAlignment="Right" VerticalAlignment="Center"/>
+                                </Grid>
+                            </Border>
+                            <ToggleButton x:Name="ToggleButton" Focusable="False"
+                                          IsChecked="{Binding IsDropDownOpen, Mode=TwoWay, RelativeSource={RelativeSource TemplatedParent}}"
+                                          ClickMode="Press" Background="Transparent" BorderThickness="0">
+                                <ToggleButton.Template>
+                                    <ControlTemplate TargetType="ToggleButton">
+                                        <Border Background="Transparent"/>
+                                    </ControlTemplate>
+                                </ToggleButton.Template>
+                            </ToggleButton>
+                            <Popup x:Name="PART_Popup" IsOpen="{TemplateBinding IsDropDownOpen}"
+                                   Placement="Bottom" AllowsTransparency="True" Focusable="False"
+                                   PopupAnimation="Slide">
+                                <Border Background="#E6202020" BorderBrush="#40FFFFFF" BorderThickness="1"
+                                        CornerRadius="4" Margin="0,2,0,0" Padding="2">
+                                    <ScrollViewer MaxHeight="200" VerticalScrollBarVisibility="Auto">
+                                        <StackPanel IsItemsHost="True"/>
+                                    </ScrollViewer>
+                                </Border>
+                            </Popup>
+                        </Grid>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="Border" Property="Background" Value="#40FFFFFF"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <Style x:Key="SettingsComboBoxItemStyle" TargetType="ComboBoxItem">
+            <Setter Property="Foreground" Value="White"/>
+            <Setter Property="FontSize" Value="13"/>
+            <Setter Property="Padding" Value="10,6"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="ComboBoxItem">
+                        <Border x:Name="Bd" Background="Transparent"
+                                Padding="{TemplateBinding Padding}" CornerRadius="3">
+                            <ContentPresenter/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="Bd" Property="Background" Value="#30FFFFFF"/>
+                            </Trigger>
+                            <Trigger Property="IsHighlighted" Value="True">
+                                <Setter TargetName="Bd" Property="Background" Value="#30FFFFFF"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <Style x:Key="SettingsScrollBarThumb" TargetType="Thumb">
+            <Setter Property="OverridesDefaultStyle" Value="True"/>
+            <Setter Property="IsTabStop" Value="False"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Thumb">
+                        <Border x:Name="ThumbBorder" Background="#40FFFFFF" CornerRadius="3" Margin="1"/>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="ThumbBorder" Property="Background" Value="#60FFFFFF"/>
+                            </Trigger>
+                            <Trigger Property="IsDragging" Value="True">
+                                <Setter TargetName="ThumbBorder" Property="Background" Value="#80FFFFFF"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <Style x:Key="SettingsScrollBarStyle" TargetType="ScrollBar">
+            <Setter Property="OverridesDefaultStyle" Value="True"/>
+            <Setter Property="Width" Value="8"/>
+            <Setter Property="MinWidth" Value="8"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="ScrollBar">
+                        <Grid Background="Transparent">
+                            <Track x:Name="PART_Track" IsDirectionReversed="True">
+                                <Track.Thumb>
+                                    <Thumb Style="{StaticResource SettingsScrollBarThumb}"/>
+                                </Track.Thumb>
+                            </Track>
+                        </Grid>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+    </UserControl.Resources>
+
+    <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" Padding="30,20">
+        <ScrollViewer.Resources>
+            <Style TargetType="ScrollBar" BasedOn="{StaticResource SettingsScrollBarStyle}"/>
+        </ScrollViewer.Resources>
+        <StackPanel>
+            <TextBlock Text="设置" Foreground="White" FontSize="24" FontWeight="SemiBold" Margin="0,0,0,24"/>
+
+            <TextBlock Text="界面" Foreground="#0078D7" FontSize="15" FontWeight="SemiBold" Margin="0,0,0,14"/>
+            <TextBlock 
+                        x:Name="NonWindows11Warning"
+                        Visibility="{Binding Windows10WarningVisibility}"
+                        Text="注意：由于Windows 10 DWM管线热切换存在bug，您需要重新启动应用程序以使更改生效" Foreground="#FFFFE0" FontSize="12" FontWeight="Bold" Margin="0,0,0,14" TextWrapping="Wrap"/>
+
+            <Grid Margin="0,0,0,14">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="Auto"/>
+                    <ColumnDefinition Width="*"/>
+                </Grid.ColumnDefinitions>
+                <StackPanel Grid.Column="0" VerticalAlignment="Center">
+                    <TextBlock Text="主题" Foreground="White" FontSize="14"/>
+                    <TextBlock Text="选择应用的外观主题" Foreground="#99FFFFFF" FontSize="12" Margin="0,2,0,0"/>
+                </StackPanel>
+                <ComboBox Grid.Column="1" HorizontalAlignment="Right"
+                          Style="{StaticResource SettingsComboBoxStyle}"
+                          ItemContainerStyle="{StaticResource SettingsComboBoxItemStyle}"
+                          SelectedItem="{Binding SelectedTheme}"
+                          ItemsSource="{Binding ThemeOptions}"/>
+            </Grid>
+
+            <Border Height="1" Background="#15FFFFFF" Margin="0,0,0,14"/>
+
+            <Grid Margin="0,0,0,14">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="Auto"/>
+                    <ColumnDefinition Width="*"/>
+                </Grid.ColumnDefinitions>
+                <StackPanel Grid.Column="0" VerticalAlignment="Center">
+                    <TextBlock Text="背景" Foreground="White" FontSize="14"/>
+                    <TextBlock Text="选择背景显示模式" Foreground="#99FFFFFF" FontSize="12" Margin="0,2,0,0"/>
+                </StackPanel>
+                <ComboBox Grid.Column="1" HorizontalAlignment="Right"
+                          Style="{StaticResource SettingsComboBoxStyle}"
+                          ItemContainerStyle="{StaticResource SettingsComboBoxItemStyle}"
+                          SelectedItem="{Binding SelectedBackground}"
+                          ItemsSource="{Binding BackgroundOptions}"/>
+            </Grid>
+
+            <Border Height="1" Background="#15FFFFFF" Margin="0,24,0,14"/>
+
+            <TextBlock Text="音频" Foreground="#0078D7" FontSize="15" FontWeight="SemiBold" Margin="0,0,0,14"/>
+			<TextBlock Text="注意：如果您更改了音频设置，您需要重新启动应用程序以使更改生效" Foreground="#FFFFE0" FontSize="12" FontWeight="Bold" Margin="0,0,0,14" TextWrapping="Wrap"/>
+
+            <Grid Margin="0,0,0,14">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="Auto"/>
+                    <ColumnDefinition Width="*"/>
+                </Grid.ColumnDefinitions>
+                <StackPanel Grid.Column="0" VerticalAlignment="Center">
+                    <TextBlock Text="声道" Foreground="White" FontSize="14"/>
+                    <TextBlock Text="选择音频输出声道" Foreground="#99FFFFFF" FontSize="12" Margin="0,2,0,0"/>
+                </StackPanel>
+                <ComboBox Grid.Column="1" HorizontalAlignment="Right"
+                          Style="{StaticResource SettingsComboBoxStyle}"
+                          ItemContainerStyle="{StaticResource SettingsComboBoxItemStyle}"
+                          SelectedItem="{Binding SelectedChannel}"
+                          ItemsSource="{Binding ChannelOptions}"/>
+            </Grid>
+
+            <Border Height="1" Background="#15FFFFFF" Margin="0,0,0,14"/>
+
+            <Grid Margin="0,0,0,14">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="Auto"/>
+                    <ColumnDefinition Width="*"/>
+                </Grid.ColumnDefinitions>
+                <StackPanel Grid.Column="0" VerticalAlignment="Center">
+                    <TextBlock Text="采样率" Foreground="White" FontSize="14"/>
+                    <TextBlock Text="选择音频采样率 (Hz)" Foreground="#99FFFFFF" FontSize="12" Margin="0,2,0,0"/>
+                </StackPanel>
+                <ComboBox Grid.Column="1" HorizontalAlignment="Right"
+                          Style="{StaticResource SettingsComboBoxStyle}"
+                          ItemContainerStyle="{StaticResource SettingsComboBoxItemStyle}"
+                          SelectedItem="{Binding SelectedSampleRate}"
+                          ItemsSource="{Binding SampleRateOptions}"/>
+            </Grid>
+        </StackPanel>
+    </ScrollViewer>
+</UserControl>

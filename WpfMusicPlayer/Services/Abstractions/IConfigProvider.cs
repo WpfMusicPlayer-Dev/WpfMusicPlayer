@@ -1,7 +1,7 @@
 using WpfMusicPlayer.Models;
-using static WpfMusicPlayer.Services.ConfigProvider;
+using static WpfMusicPlayer.Services.Implementations.ConfigProvider;
 
-namespace WpfMusicPlayer.Services
+namespace WpfMusicPlayer.Services.Abstractions
 {
     public interface IConfigProvider
     {

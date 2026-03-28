@@ -1,4 +1,4 @@
-namespace WpfMusicPlayer.Services;
+namespace WpfMusicPlayer.Services.Abstractions;
 
 public interface IFileDialogService
 {

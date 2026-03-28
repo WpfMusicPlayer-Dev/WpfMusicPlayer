@@ -1,4 +1,5 @@
-﻿using System.Runtime.InteropServices;
+﻿using System;
+using System.Runtime.InteropServices;
 using System.Windows;
 using System.Windows.Interop;
 using System.Windows.Media;
@@ -7,6 +8,7 @@ namespace WpfMusicPlayer.Helpers;
 
 internal static class GaussianBlueHelper
 {
+
     [DllImport("user32.dll")]
     private static extern int SetWindowCompositionAttribute(IntPtr hwnd, ref WindowCompositionAttributeData data);
 
@@ -19,10 +21,7 @@ internal static class GaussianBlueHelper
     [StructLayout(LayoutKind.Sequential)]
     private struct Margins
     {
-        public int Left;
-        public int Right;
-        public int Top;
-        public int Bottom;
+        public int Left, Right, Top, Bottom;
     }
 
     [StructLayout(LayoutKind.Sequential)]
@@ -43,94 +42,144 @@ internal static class GaussianBlueHelper
     }
 
     private const int WCA_ACCENT_POLICY = 19;
+    private const int ACCENT_ENABLE_GRADIENT = 1;
     private const int ACCENT_ENABLE_BLURBEHIND = 3;
+
+    private const int DWMWA_SYSTEMBACKDROP_TYPE = 38;
     private const int DWMWA_USE_IMMERSIVE_DARK_MODE = 20;
 
-    [DllImport("ntdll.dll")]
-    static extern int RtlGetVersion(ref OSVERSIONINFOEX versionInfo);
-
-    [StructLayout(LayoutKind.Sequential)]
-    public struct OSVERSIONINFOEX
-    {
-        public int dwOSVersionInfoSize;
-        public int dwMajorVersion;
-        public int dwMinorVersion;
-        public int dwBuildNumber;
-        public int dwPlatformId;
-        [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 128)]
-        public string szCSDVersion;
-    }
-
-    public static bool IsWindows11()
-    {
-        OSVERSIONINFOEX v = new OSVERSIONINFOEX();
-        v.dwOSVersionInfoSize = Marshal.SizeOf(v);
-        RtlGetVersion(ref v);
-        return v.dwMajorVersion == 10 && v.dwBuildNumber >= 22000;
-    }
     public enum DwmSystemBackdropType
     {
-        Auto = 0,
         None = 1,
-        Mica = 2,
-        Acrylic = 3,
-        Tabbed = 4
+        Acrylic = 3
     }
 
-    public static void EnableBlur(Window window, bool enableAcrylic = false, uint tintColor = 0xCC222222)
+
+    public static void EnableDarkMode(Window window)
     {
-        var hwndSource = (HwndSource?)PresentationSource.FromVisual(window);
-        if (hwndSource?.CompositionTarget == null)
-            return;
+        var hwnd = GetHwnd(window);
+        if (hwnd == IntPtr.Zero) return;
 
-        var hwnd = hwndSource.Handle;
+        var dark = 1;
+        DwmSetWindowAttribute(hwnd, DWMWA_USE_IMMERSIVE_DARK_MODE, ref dark, sizeof(int));
+    }
 
-        // 启用深色模式
-        // 该API在Windows 10 2004+测试通过，Windows 11官方支持
-        int darkMode = 1;
-        DwmSetWindowAttribute(hwnd, DWMWA_USE_IMMERSIVE_DARK_MODE, ref darkMode, sizeof(int));
+    public static void EnableAcrylic(Window window, uint tintColor = 0xCC222222)
+    {
+        if (OsVersionHelper.IsWindows11())
+            Win11_ApplyBackdrop(window, DwmSystemBackdropType.Acrylic);
+        else
+            Win10_ApplyBlur(window, tintColor);
+    }
 
-        hwndSource.CompositionTarget.BackgroundColor = Colors.Transparent;
+    public static void EnableSolid(Window window)
+    {
+        if (OsVersionHelper.IsWindows11())
+            Win11_ApplyBackdrop(window, DwmSystemBackdropType.None);
+        else
+            Win10_ApplySolid(window);
+    }
 
-        // 去除标题栏（扩展客户端区域到整个窗口）
+    public static void EnableImageBlur(Window window)
+    {
+        if (OsVersionHelper.IsWindows11())
+            Win11_ApplyBackdrop(window, DwmSystemBackdropType.None);
+        else
+            Win10_ApplyImageBlur(window);
+    }
+
+    private static void Win10_ApplyBlur(Window window, uint tintColor)
+    {
+        var hwnd = GetHwnd(window);
+        if (hwnd == IntPtr.Zero) return;
+
+        ExtendFrame(hwnd);
+
+        var accent = new AccentPolicy
+        {
+            AccentState = ACCENT_ENABLE_BLURBEHIND,
+            AccentFlags = 2,
+            GradientColor = tintColor
+        };
+
+        ApplyAccent(hwnd, accent);
+    }
+
+    private static void Win10_ApplySolid(Window window)
+    {
+        var hwnd = GetHwnd(window);
+        if (hwnd == IntPtr.Zero) return;
+
+        ExtendFrame(hwnd);
+
+        var accent = new AccentPolicy
+        {
+            AccentState = ACCENT_ENABLE_BLURBEHIND,
+            AccentFlags = 2,
+            GradientColor = 0xFF000000
+        };
+
+        ApplyAccent(hwnd, accent);
+    }
+
+    private static void Win10_ApplyImageBlur(Window window)
+    {
+        var hwnd = GetHwnd(window);
+        if (hwnd == IntPtr.Zero) return;
+
+        ExtendFrame(hwnd);
+
+        var accent = new AccentPolicy
+        {
+            AccentState = ACCENT_ENABLE_GRADIENT,
+            AccentFlags = 0,
+            GradientColor = 0x00000000
+        };
+
+        ApplyAccent(hwnd, accent);
+    }
+    private static void Win11_ApplyBackdrop(Window window, DwmSystemBackdropType type)
+    {
+        var hwnd = GetHwnd(window);
+        if (hwnd == IntPtr.Zero) return;
+
+        var backdrop = (int)type;
+        DwmSetWindowAttribute(hwnd, DWMWA_SYSTEMBACKDROP_TYPE, ref backdrop, sizeof(int));
+    }
+
+    private static IntPtr GetHwnd(Window window)
+    {
+        var src = (HwndSource?)PresentationSource.FromVisual(window);
+        return src?.Handle ?? IntPtr.Zero;
+    }
+
+    private static void ExtendFrame(IntPtr hwnd)
+    {
         var margins = new Margins { Left = -1, Right = -1, Top = -1, Bottom = -1 };
         DwmExtendFrameIntoClientArea(hwnd, ref margins);
-        if (!enableAcrylic) return; 
-        if (IsWindows11())
+    }
+
+    private static void ApplyAccent(IntPtr hwnd, AccentPolicy accent)
+    {
+        var size = Marshal.SizeOf<AccentPolicy>();
+        var ptr = Marshal.AllocHGlobal(size);
+
+        try
         {
-            // Win11的云母效果好像也不是很好，所以启用Acrylic
-            const int DWMWA_SYSTEMBACKDROP_TYPE = 38;
-            int backdrop = (int)DwmSystemBackdropType.Acrylic;
-            DwmSetWindowAttribute(hwnd, DWMWA_SYSTEMBACKDROP_TYPE, ref backdrop, sizeof(int));
-        } else
-        {
-            // 回落至高斯模糊，Windows 10似乎对Acrylic支持不好。
-            var accent = new AccentPolicy
+            Marshal.StructureToPtr(accent, ptr, false);
+
+            var data = new WindowCompositionAttributeData
             {
-                AccentState = ACCENT_ENABLE_BLURBEHIND,
-                AccentFlags = 2,
-                GradientColor = tintColor
+                Attribute = WCA_ACCENT_POLICY,
+                Data = ptr,
+                SizeOfData = size
             };
 
-            var accentSize = Marshal.SizeOf<AccentPolicy>();
-            var accentPtr = Marshal.AllocHGlobal(accentSize);
-            try
-            {
-                Marshal.StructureToPtr(accent, accentPtr, false);
-
-                var data = new WindowCompositionAttributeData
-                {
-                    Attribute = WCA_ACCENT_POLICY,
-                    Data = accentPtr,
-                    SizeOfData = accentSize
-                };
-
-                SetWindowCompositionAttribute(hwnd, ref data);
-            }
-            finally
-            {
-                Marshal.FreeHGlobal(accentPtr);
-            }
+            SetWindowCompositionAttribute(hwnd, ref data);
+        }
+        finally
+        {
+            Marshal.FreeHGlobal(ptr);
         }
     }
 }

@@ -1,7 +1,8 @@
 using System.Windows;
 using WinRT.Interop;
+using WpfMusicPlayer.Services.Abstractions;
 
-namespace WpfMusicPlayer.Services;
+namespace WpfMusicPlayer.Services.Implementations;
 
 public class FileDialogService : IFileDialogService
 {

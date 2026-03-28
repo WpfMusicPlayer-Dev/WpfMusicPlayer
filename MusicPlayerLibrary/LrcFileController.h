@@ -4,7 +4,7 @@
 namespace MusicPlayerLibrary
 {
     
-enum class LrcMetadataType
+enum class LrcMetadataTypeNative
 {
 	Artist, Album, Author, By, Offset, Title, Ignored, Error
 };
@@ -260,6 +260,7 @@ public:
 	int get_lrc_line_at(int lrc_node_index, int index, CString& out_str) const;
 	[[nodiscard]] int get_current_lrc_line_aux_index(LrcAuxiliaryInfoNative info) const;
 	[[nodiscard]] int get_lrc_line_aux_index(int lrc_node_index, LrcAuxiliaryInfoNative info) const;
+	[[nodiscard]] int get_metadata_info(LrcMetadataTypeNative metadata_type, CString& out_str) const;
 
 	[[nodiscard]] int is_auxiliary_info_enabled(LrcAuxiliaryInfoNative enable_info) const
 	{
@@ -278,7 +279,7 @@ public:
 	float get_lrc_percentage(int index) { return lrc_nodes[index]->get_lrc_percentage(time_stamp_ms / 1000.0f); }
 
 	// static helpers
-	static LrcMetadataType get_metadata_type(const CString& str);
+	static LrcMetadataTypeNative get_metadata_type(const CString& str);
 	static int cstring_hash_fnv_64bit_int(const CString& str);
 	static CString get_metadata_value(const CString& str);
 };
@@ -289,6 +290,11 @@ public enum class LrcAuxiliaryInfo
 	Translation = 1,
 	Romanization = 2,
 	Ignored = 3
+};
+
+public enum class LrcMetadataType
+{
+	Artist, Album, Author, By, Offset, Title, Ignored, Error
 };
 
 public ref class LrcFileController:
@@ -320,6 +326,7 @@ public:
 
 	int GetCurrentLrcLineAuxIndex(LrcAuxiliaryInfo info);
 	int GetLrcLineAuxIndex(int lrcNodeIndex, LrcAuxiliaryInfo info);
+	System::String^ GetMetadataInfo(LrcMetadataType type);
 
 	bool IsAuxiliaryInfoEnabled(LrcAuxiliaryInfo enableInfo);
 	void SetAuxiliaryInfoEnabled(LrcAuxiliaryInfo enableInfo);

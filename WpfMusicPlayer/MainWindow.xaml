@@ -5,6 +5,7 @@
         xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
         xmlns:vm="clr-namespace:WpfMusicPlayer.ViewModels"
         xmlns:views="clr-namespace:WpfMusicPlayer.Views"
+        xmlns:helpers="clr-namespace:WpfMusicPlayer.Helpers"
         mc:Ignorable="d"
         d:DataContext="{d:DesignInstance Type=vm:MainViewModel}"
         Title="WpfMusicPlayer" Height="600" Width="800"
@@ -53,7 +54,7 @@
     </Window.Resources>
 
     <Grid>
-        <Border VerticalAlignment="Center"
+        <Border x:Name="BackgroundImageBorder" VerticalAlignment="Center"
                 Width="{Binding ActualWidth, RelativeSource={RelativeSource AncestorType=Window}}"
                 Height="{Binding ActualHeight, RelativeSource={RelativeSource AncestorType=Window}}"
                 IsHitTestVisible="False"
@@ -73,38 +74,59 @@
             </Image>
         </Border>
 
-        <Button
-            Content="☰"
-                WindowChrome.IsHitTestVisibleInChrome="True"
-                VerticalAlignment="Top" HorizontalAlignment="Left"
-                Width="46" Height="32"
-                Background="Transparent" Foreground="White"
-                BorderThickness="0" FontSize="16" FontFamily="Segoe MDL2 Assets"
-                Click="MenuButton_Click"
-                Panel.ZIndex="100">
-            <Button.Style>
-                <Style TargetType="Button">
-                    <Setter Property="Template">
-                        <Setter.Value>
-                            <ControlTemplate TargetType="Button">
-                                <Border x:Name="Bg" Background="Transparent">
-                                    <TextBlock Text="&#xE700;" FontFamily="Segoe MDL2 Assets" FontSize="16"
-                                               Foreground="White" HorizontalAlignment="Center" VerticalAlignment="Center"/>
-                                </Border>
-                                <ControlTemplate.Triggers>
-                                    <Trigger Property="IsMouseOver" Value="True">
-                                        <Setter TargetName="Bg" Property="Background" Value="#20FFFFFF"/>
-                                    </Trigger>
-                                    <Trigger Property="IsPressed" Value="True">
-                                        <Setter TargetName="Bg" Property="Background" Value="#30FFFFFF"/>
-                                    </Trigger>
-                                </ControlTemplate.Triggers>
-                            </ControlTemplate>
-                        </Setter.Value>
-                    </Setter>
-                </Style>
-            </Button.Style>
-        </Button>
+        <StackPanel Orientation="Horizontal" VerticalAlignment="Top" HorizontalAlignment="Left"
+                    Panel.ZIndex="100">
+            <Button Width="46" Height="32" Click="MenuButton_Click"
+                    WindowChrome.IsHitTestVisibleInChrome="True">
+                <Button.Style>
+                    <Style TargetType="Button">
+                        <Setter Property="Template">
+                            <Setter.Value>
+                                <ControlTemplate TargetType="Button">
+                                    <Border x:Name="Bg" Background="Transparent">
+                                        <TextBlock Text="&#xE700;" FontFamily="Segoe MDL2 Assets" FontSize="16"
+                                                   Foreground="White" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                                    </Border>
+                                    <ControlTemplate.Triggers>
+                                        <Trigger Property="IsMouseOver" Value="True">
+                                            <Setter TargetName="Bg" Property="Background" Value="#20FFFFFF"/>
+                                        </Trigger>
+                                        <Trigger Property="IsPressed" Value="True">
+                                            <Setter TargetName="Bg" Property="Background" Value="#30FFFFFF"/>
+                                        </Trigger>
+                                    </ControlTemplate.Triggers>
+                                </ControlTemplate>
+                            </Setter.Value>
+                        </Setter>
+                    </Style>
+                </Button.Style>
+            </Button>
+            <Button Width="46" Height="32" Click="HomeButton_Click"
+                    WindowChrome.IsHitTestVisibleInChrome="True">
+                <Button.Style>
+                    <Style TargetType="Button">
+                        <Setter Property="Template">
+                            <Setter.Value>
+                                <ControlTemplate TargetType="Button">
+                                    <Border x:Name="Bg" Background="Transparent">
+                                        <TextBlock Text="&#xE80F;" FontFamily="Segoe MDL2 Assets" FontSize="16"
+                                                   Foreground="White" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                                    </Border>
+                                    <ControlTemplate.Triggers>
+                                        <Trigger Property="IsMouseOver" Value="True">
+                                            <Setter TargetName="Bg" Property="Background" Value="#20FFFFFF"/>
+                                        </Trigger>
+                                        <Trigger Property="IsPressed" Value="True">
+                                            <Setter TargetName="Bg" Property="Background" Value="#30FFFFFF"/>
+                                        </Trigger>
+                                    </ControlTemplate.Triggers>
+                                </ControlTemplate>
+                            </Setter.Value>
+                        </Setter>
+                    </Style>
+                </Button.Style>
+            </Button>
+        </StackPanel>
 
         <Grid x:Name="ContentArea" Margin="0,32,0,0">
             <Grid.RowDefinitions>
@@ -133,6 +155,11 @@
                             <Image Stretch="UniformToFill" Source="{Binding AlbumCoverImage}"/>
                         </Grid>
                     </Border>
+                    <helpers:SpectrumVisualizerControl x:Name="LandscapeSpectrum"
+                        Width="240" Height="64" Margin="0,0,0,20"
+                        SpectrumData="{Binding SpectrumData}"
+                        BarBrush="#AAFFFFFF" BarSpacing="2" BarCornerRadius="1.5"
+                        PeakBrush="#B0FFFFFF"/>
                 </StackPanel>
 
                 <views:LyricsView x:Name="LandscapeLyricsView" Grid.Column="1" Margin="20,0,0,0"
@@ -144,6 +171,13 @@
                     <TranslateTransform/>
                 </views:PlaylistView.RenderTransform>
             </views:PlaylistView>
+
+            <views:SettingsView x:Name="SettingsContent" Grid.Row="0" Visibility="Collapsed"
+                                DataContext="{Binding Settings}">
+                <views:SettingsView.RenderTransform>
+                    <TranslateTransform/>
+                </views:SettingsView.RenderTransform>
+            </views:SettingsView>
 
             <Grid x:Name="PortraitContent" Grid.Row="0" Margin="20" Visibility="Collapsed">
                 <Grid.RowDefinitions>
@@ -225,11 +259,14 @@
                         <RowDefinition Height="Auto"/>
                     </Grid.RowDefinitions>
 
-                    <StackPanel Grid.Row="0" Orientation="Horizontal" VerticalAlignment="Center" Margin="16,0">
-                        <TextBlock Text="&#xE8D6;" FontFamily="Segoe MDL2 Assets" FontSize="20"
-                                   Foreground="#0078D7" VerticalAlignment="Center" Margin="0,0,12,0"/>
-                        <TextBlock Text="WpfMusicPlayer" Foreground="White" FontSize="16" FontWeight="SemiBold"
-                                   VerticalAlignment="Center"/>
+                    <StackPanel Grid.Row="0" Orientation="Horizontal" VerticalAlignment="Center" Margin="16">
+                        <Image Source="pack://application:,,,/Assets/ApplicationIcon.ico" 
+                            Width="24" Height="24" 
+                            Opacity="0.9"
+                            VerticalAlignment="Center"/>
+
+                        <TextBlock Text="WPF" Foreground="#BBFFFFFF" FontSize="16" FontWeight="Light" Margin="12,0,0,0"/>
+                        <TextBlock Text="MUSIC" Foreground="White" FontSize="16" FontWeight="SemiBold"/>
                     </StackPanel>
 
                     <Border Grid.Row="1" Height="1" Background="#30FFFFFF" Margin="12,0"/>
@@ -275,6 +312,13 @@
                                  ItemContainerStyle="{StaticResource SidebarMenuItemStyle}"
                                  SelectionChanged="SidebarMenuBottom_SelectionChanged"
                                  x:Name="SidebarMenuBottomList">
+                            <ListBoxItem>
+                                <StackPanel Orientation="Horizontal">
+                                    <TextBlock Text="&#xE117;" FontFamily="Segoe MDL2 Assets" FontSize="16"
+                                               VerticalAlignment="Center" Margin="0,0,14,0" Foreground="White"/>
+                                    <TextBlock Text="重启" VerticalAlignment="Center" Foreground="White"/>
+                                </StackPanel>
+                            </ListBoxItem>
                             <ListBoxItem>
                                 <StackPanel Orientation="Horizontal">
                                     <TextBlock Text="&#xE946;" FontFamily="Segoe MDL2 Assets" FontSize="16"

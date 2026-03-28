@@ -1,7 +1,7 @@
 ﻿using System;
 using System.IO;
 
-namespace WpfMusicPlayer.Services;
+namespace WpfMusicPlayer.Services.Abstractions;
 
 public enum PlaybackState
 {

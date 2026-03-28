@@ -187,6 +187,8 @@
   </ItemDefinitionGroup>
   <ItemGroup>
     <ClInclude Include="AtlTraceRedirect.h" />
+    <ClInclude Include="FFTExecuter.h" />
+    <ClInclude Include="LocaleConverter.h" />
     <ClInclude Include="LrcFileController.h" />
     <ClInclude Include="MusicPlayerLibrary.h" />
     <ClInclude Include="pch.h" />
@@ -195,6 +197,8 @@
   <ItemGroup>
     <ClCompile Include="AssemblyInfo.cpp" />
     <ClCompile Include="AtlTraceRedirect.cpp" />
+    <ClCompile Include="FFTExecuter.cpp" />
+    <ClCompile Include="LocaleConverter.cpp" />
     <ClCompile Include="LrcFileController.cpp" />
     <ClCompile Include="MusicPlayerLibrary.cpp" />
     <ClCompile Include="NcmDecryptor.cpp" />
