@@ -2,6 +2,12 @@
   "name": "musicplayerlibrary",
   "version-string": "0.1.0",
   "dependencies": [
-    "ffmpeg", "openssl", "rapidjson", "cpp-base64", "kissfft"
+    "ffmpeg",
+    "openssl",
+    "rapidjson",
+    "cpp-base64",
+    "kissfft",
+    "uchardet",
+    "libiconv"
   ]
 }

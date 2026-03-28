@@ -4,6 +4,7 @@
 #include <msclr/marshal_cppstd.h>
 
 #include "AtlTraceRedirect.h"
+#include "LocaleConverter.h"
 #include <io.h>
 
 

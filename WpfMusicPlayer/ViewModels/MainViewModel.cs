@@ -690,6 +690,7 @@ public class MainViewModel : ViewModelBase, IDisposable
 
     private void LoadLyrics()
     {
+        // FFmpeg会自动转换ID3v2 tag到UTF-8
         var lyricsStr = _musicPlayer.GetID3Lyric();
         Lyrics.Clear();
         CurrentLyricIndex = -1;
@@ -710,12 +711,14 @@ public class MainViewModel : ViewModelBase, IDisposable
             }
         }
 
+        // 文件的编码可能是乱来的，不可信
         var lrcPath = FindBestLrcFile();
         if (!string.IsNullOrEmpty(lrcPath))
         {
             try
             {
-                var content = File.ReadAllText(lrcPath);
+                var content_bytes = File.ReadAllBytes(lrcPath);
+                var content = LocaleConverter.GetSystemStringFromBytes(content_bytes);
                 ParseAndAddLocalLyric(content);
                 return;
             }
@@ -731,7 +734,8 @@ public class MainViewModel : ViewModelBase, IDisposable
         {
             try
             {
-                var content = File.ReadAllText(exactLrcPath);
+                var content_bytes = File.ReadAllBytes(exactLrcPath);
+                var content = LocaleConverter.GetSystemStringFromBytes(content_bytes);
                 ParseAndAddLocalLyric(content);
                 return;
             }

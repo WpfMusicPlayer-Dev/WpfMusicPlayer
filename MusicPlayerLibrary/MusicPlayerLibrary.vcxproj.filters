@@ -33,6 +33,9 @@
     <ClInclude Include="FFTExecuter.h">
       <Filter>头文件</Filter>
     </ClInclude>
+    <ClInclude Include="LocaleConverter.h">
+      <Filter>头文件</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="MusicPlayerLibrary.cpp">
@@ -54,6 +57,9 @@
       <Filter>源文件</Filter>
     </ClCompile>
     <ClCompile Include="FFTExecuter.cpp">
+      <Filter>源文件</Filter>
+    </ClCompile>
+    <ClCompile Include="LocaleConverter.cpp">
       <Filter>源文件</Filter>
     </ClCompile>
   </ItemGroup>

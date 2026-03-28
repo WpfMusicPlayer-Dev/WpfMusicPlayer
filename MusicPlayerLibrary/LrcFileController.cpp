@@ -1,6 +1,7 @@
 ﻿#include "pch.h"
 #include "AtlTraceRedirect.h"
 #include "LrcFileController.h"
+#include "LocaleConverter.h"
 
 #include <msclr/marshal_cppstd.h>
 #include <vcclr.h>
@@ -494,10 +495,7 @@ void LrcFileControllerNative::parse_lrc_file_stream(CFile* file_stream)
     while (bytes_read > 0);
 
     // 转换为宽字符
-    int wide_len = MultiByteToWideChar(CP_UTF8, 0, file_content_a, -1, nullptr, 0);
-    CString file_content_w;
-    MultiByteToWideChar(CP_UTF8, 0, file_content_a, -1, file_content_w.GetBuffer(wide_len), wide_len);
-    file_content_w.ReleaseBuffer();
+    CString file_content_w = LocaleConverterNative::GetUtf16StringFromUtf8String(file_content_a);
     
     // fix issue #12
     // 关于歌词文件/歌曲内嵌歌词内出现时间tag非强制有序的翻译歌词时程序的错误/闪退问题
