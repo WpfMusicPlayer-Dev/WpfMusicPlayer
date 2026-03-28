@@ -860,12 +860,19 @@ public class MainViewModel : ViewModelBase, IDisposable
 
     private void AddToPlaylist()
     {
-        if (_currentFilePath == null) return;
+        if (_currentFilePath == null
+            || _currentMd5 == null) return;
         if (PlaylistItems.All(p => p.FilePath != _currentFilePath))
         {
-            PlaylistItems.Add(new PlaylistItemViewModel(
-                _currentFilePath, SongTitle, ArtistName, TotalTime)
-            { AlbumCover = AlbumCoverImage });
+            var itemVM = new PlaylistItemViewModel(
+                _currentFilePath, SongTitle, ArtistName, TotalTime);
+            // query database, get album cover
+            var cached = _songDatabase.FindByMd5(_currentMd5);
+            if (cached?.AlbumArt is { Length: > 0 })
+                itemVM.AlbumCover = LoadBitmapImageFromBytes(cached.AlbumArt);
+            else if (AlbumCoverImage is not null)
+                itemVM.AlbumCover = AlbumCoverImage;
+            PlaylistItems.Add(itemVM);
         }
         foreach (var item in PlaylistItems)
             item.IsPlaying = item.FilePath == _currentFilePath;
