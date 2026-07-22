@@ -5,22 +5,6 @@
 #include "Audio/Pipeline/Observer/FFTAudioObserve.h"
 #include "Audio/FFT/FFTExecuter.h"
 
-namespace
-{
-	bool SameFftInputFormat(
-		const MusicPlayerLibrary::AudioOutputFormat& left,
-		const MusicPlayerLibrary::AudioOutputFormat& right) noexcept
-	{
-		return left.sample_rate == right.sample_rate &&
-			left.channel_count == right.channel_count &&
-			left.channel_mask == right.channel_mask &&
-			left.bit_depth == right.bit_depth &&
-			left.sample_format == right.sample_format &&
-			left.wave_format.Format.nBlockAlign ==
-				right.wave_format.Format.nBlockAlign;
-	}
-}
-
 MusicPlayerLibrary::FFTAudioObserve::FFTAudioObserve(
 	const AudioOutputFormat& format) :
 	format_(format),
@@ -37,7 +21,7 @@ void MusicPlayerLibrary::FFTAudioObserve::OnFormat(
 	std::lock_guard lock(mutex_);
 	if (generation < generation_)
 		return;
-	if (SameFftInputFormat(format, format_))
+	if (AreResolvedPcmFormatsEqual(format, format_))
 	{
 		// Reset before publishing the new generation. CopySpectrum takes the
 		// same lock, so it can never observe a new generation paired with the

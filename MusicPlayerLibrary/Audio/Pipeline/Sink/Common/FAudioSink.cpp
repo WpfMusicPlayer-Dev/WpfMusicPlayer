@@ -10,8 +10,10 @@
 #include <limits>
 #include <stdexcept>
 
-#include "Audio/DSP/FapoEqualizer.h"
-#include "Audio/Pipeline/Sink/FAudioSink.h"
+#include "Audio/Pipeline/Sink/Common/FapoEqualizer.h"
+#include "Audio/Pipeline/Sink/Common/FAudioSink.h"
+#include "Core/ChronoUtilities.h"
+#include "Core/NumericConversion.h"
 
 namespace
 {
@@ -21,12 +23,6 @@ namespace
 		(std::numeric_limits<std::uint64_t>::max)();
 	constexpr auto BufferDrainTimeout = std::chrono::seconds(2);
 	constexpr auto PresentationWaitPollInterval = std::chrono::milliseconds(2);
-
-	std::int64_t PlaybackClockNowNanoseconds() noexcept
-	{
-		return std::chrono::duration_cast<std::chrono::nanoseconds>(
-			std::chrono::steady_clock::now().time_since_epoch()).count();
-	}
 
 	std::uint64_t PublishMonotonic(
 		std::atomic<std::uint64_t>& destination,
@@ -82,49 +78,47 @@ void MusicPlayerLibrary::FAudioSink::CreateSourceVoice()
 	voice_callback_.callbacks.OnVoiceProcessingPassEnd =
 		&FAudioSink::OnVoiceProcessingPassEnd;
 
-	if (FAudio_CreateSourceVoice(
+	FAudioSourceVoice* raw_source_voice = nullptr;
+	const auto create_voice_result = FAudio_CreateSourceVoice(
 		device_->GetEngine(),
-		&source_voice_,
+		&raw_source_voice,
 		&output_format_.wave_format.Format,
 		FAUDIO_VOICE_NOPITCH,
 		2.0f,
 		&voice_callback_.callbacks,
 		nullptr,
-		nullptr) != FAUDIO_OK || !source_voice_)
+		nullptr);
+	UniqueFAudioVoice source_voice(raw_source_voice);
+	if (create_voice_result != FAUDIO_OK || !source_voice)
 	{
 		throw std::runtime_error("FAudio_CreateSourceVoice failed");
 	}
+	source_voice_ = std::move(source_voice);
 
 	AudioDsp::EqualizerDspSnapshot initial_snapshot;
 	{
 		std::lock_guard effect_lock(effect_mutex_);
-		initial_snapshot = BuildEqualizerSnapshotLocked();
+		initial_snapshot = equalizer_settings_.Compile(output_format_.sample_rate);
 	}
-	const AudioDsp::LimiterConfig limiter{
-		.enabled = true,
-		.ceiling = 1.0f,
-		// Zero attack and zero added latency keep live flat/EQ transitions from
-		// inserting or discarding delayed PCM while still enforcing full scale.
-		.lookahead_ms = 0.0f,
-		.release_ms = 50.0f,
-		.match_input_loudness = true
-	};
+	const auto limiter = AudioDsp::MakeSinkLimiterConfig();
 	const auto lookahead_frames = static_cast<std::uint32_t>(std::floor(
 		static_cast<double>(output_format_.sample_rate) * limiter.lookahead_ms /
 		1000.0));
 	limiter_latency_frames_ = limiter.enabled && lookahead_frames > 0
 		? lookahead_frames - 1
 		: 0;
-	FAPO* equalizer = nullptr;
-	if (AudioDsp::CreateEqualizerFapo(initial_snapshot, limiter, &equalizer) != FAUDIO_OK ||
-		!equalizer)
+	FAPO* raw_equalizer = nullptr;
+	const auto create_equalizer_result = AudioDsp::CreateEqualizerFapo(
+		initial_snapshot, limiter, &raw_equalizer);
+	AudioDsp::UniqueFapo equalizer(raw_equalizer);
+	if (create_equalizer_result != FAUDIO_OK || !equalizer)
 	{
 		DestroySourceVoice();
 		throw std::runtime_error("CreateEqualizerFapo failed");
 	}
 
 	FAudioEffectDescriptor effect_descriptor{
-		.pEffect = equalizer,
+		.pEffect = equalizer.get(),
 		.InitialState = 0,
 		.OutputChannels = output_format_.wave_format.Format.nChannels
 	};
@@ -133,16 +127,15 @@ void MusicPlayerLibrary::FAudioSink::CreateSourceVoice()
 		.pEffectDescriptors = &effect_descriptor
 	};
 	const std::uint32_t effect_result =
-		FAudioVoice_SetEffectChain(source_voice_, &effect_chain);
+		FAudioVoice_SetEffectChain(source_voice_.get(), &effect_chain);
 	if (effect_result != FAUDIO_OK)
 	{
-		equalizer->Release(equalizer);
 		DestroySourceVoice();
 		throw std::runtime_error("FAudioVoice_SetEffectChain failed");
 	}
 	// Keep the factory reference in addition to FAudio's effect-chain
 	// reference. The control worker only reads atomics through this handle.
-	equalizer_effect_ = equalizer;
+	equalizer_effect_ = std::move(equalizer);
 
 	{
 		std::lock_guard effect_lock(effect_mutex_);
@@ -159,14 +152,9 @@ void MusicPlayerLibrary::FAudioSink::DestroySourceVoice() noexcept
 	if (source_voice_)
 	{
 		AbortStream();
-		FAudioVoice_DestroyVoice(source_voice_);
-		source_voice_ = nullptr;
+		source_voice_.reset();
 	}
-	if (equalizer_effect_)
-	{
-		equalizer_effect_->Release(equalizer_effect_);
-		equalizer_effect_ = nullptr;
-	}
+	equalizer_effect_.reset();
 	is_limiter_enabled_.store(false, std::memory_order_release);
 	effect_latency_frames_.store(0, std::memory_order_release);
 }
@@ -260,7 +248,7 @@ bool MusicPlayerLibrary::FAudioSink::SubmitBufferLocked(
 	if (media_frames)
 		submitted_media_frames_.fetch_add(frame_count, std::memory_order_release);
 	if (FAudioSourceVoice_SubmitSourceBuffer(
-		source_voice_, &slot->descriptor, nullptr) != FAUDIO_OK)
+		source_voice_.get(), &slot->descriptor, nullptr) != FAUDIO_OK)
 	{
 		if (media_frames)
 			submitted_media_frames_.fetch_sub(frame_count, std::memory_order_release);
@@ -337,7 +325,7 @@ void MusicPlayerLibrary::FAudioSink::TailDrainWorker(
 			if (probe_process_sequence != TailBarrierProcessSequence)
 			{
 				while (!stop_token.stop_requested() &&
-					AudioDsp::EqualizerFapoProcessSequence(equalizer_effect_) ==
+					AudioDsp::EqualizerFapoProcessSequence(equalizer_effect_.get()) ==
 						probe_process_sequence)
 				{
 					if (probe_generation !=
@@ -366,7 +354,7 @@ void MusicPlayerLibrary::FAudioSink::TailDrainWorker(
 			// process-sequence change before HasTail is sampled.
 			const bool has_tail =
 				probe_process_sequence == TailBarrierProcessSequence ||
-				AudioDsp::EqualizerFapoHasTail(equalizer_effect_);
+				AudioDsp::EqualizerFapoHasTail(equalizer_effect_.get());
 			const auto frame_count = has_tail
 				? TailDrainChunkFrames
 				: std::uint32_t{1};
@@ -377,7 +365,7 @@ void MusicPlayerLibrary::FAudioSink::TailDrainWorker(
 				{}, byte_count, frame_count, probe_generation,
 				!has_tail, has_tail,
 				has_tail
-					? AudioDsp::EqualizerFapoProcessSequence(equalizer_effect_)
+					? AudioDsp::EqualizerFapoProcessSequence(equalizer_effect_.get())
 					: 0,
 				false))
 			{
@@ -388,25 +376,28 @@ void MusicPlayerLibrary::FAudioSink::TailDrainWorker(
 		}
 		catch (...)
 		{
-			voice_error_.store(FAUDIO_E_FAIL, std::memory_order_release);
-			stream_phase_.store(StreamPhase::error, std::memory_order_release);
-			stream_end_cv_.notify_all();
+			HandleVoiceError(FAUDIO_E_FAIL, 0);
 		}
 	}
+}
+
+void MusicPlayerLibrary::FAudioSink::UnaccountBufferFramesLocked(
+	BufferSlot* slot) noexcept
+{
+	if (!slot || !slot->frames_accounted)
+		return;
+	queued_frames_ = queued_frames_ >= slot->frame_count
+		? queued_frames_ - slot->frame_count
+		: 0;
+	slot->frames_accounted = false;
 }
 
 void MusicPlayerLibrary::FAudioSink::ReleaseBufferLocked(BufferSlot* slot) noexcept
 {
 	if (!slot || !slot->in_use)
 		return;
-	if (slot->frames_accounted)
-	{
-		queued_frames_ = queued_frames_ >= slot->frame_count
-			? queued_frames_ - slot->frame_count
-			: 0;
-	}
+	UnaccountBufferFramesLocked(slot);
 	slot->in_use = false;
-	slot->frames_accounted = false;
 	if (free_buffer_count_ < BufferPoolSize)
 		free_buffers_[free_buffer_count_++] = slot;
 	if (in_flight_count_ > 0)
@@ -435,13 +426,7 @@ void MusicPlayerLibrary::FAudioSink::RecycleBuffer(
 		if (defer_eos_until_stream_end && slot->end_of_stream &&
 			!aborting_.load(std::memory_order_acquire))
 		{
-			if (slot->frames_accounted)
-			{
-				queued_frames_ = queued_frames_ >= slot->frame_count
-					? queued_frames_ - slot->frame_count
-					: 0;
-				slot->frames_accounted = false;
-			}
+			UnaccountBufferFramesLocked(slot);
 			pending_eos_callback_ = slot;
 			return;
 		}
@@ -450,9 +435,7 @@ void MusicPlayerLibrary::FAudioSink::RecycleBuffer(
 	}
 	catch (...)
 	{
-		voice_error_.store(FAUDIO_E_FAIL, std::memory_order_release);
-		stream_phase_.store(StreamPhase::error, std::memory_order_release);
-		stream_end_cv_.notify_all();
+		HandleVoiceError(FAUDIO_E_FAIL, 0);
 	}
 }
 
@@ -477,7 +460,7 @@ void MusicPlayerLibrary::FAudioSink::HandleStreamEnd() noexcept
 				std::memory_order_acq_rel))
 		{
 			engine_ended_generation = current_generation;
-			engine_end_clock_nanoseconds = PlaybackClockNowNanoseconds();
+			engine_end_clock_nanoseconds = SteadyClockNowNanoseconds();
 			final_media_frames = submitted_media_frames_.load(
 				std::memory_order_acquire);
 		}
@@ -486,8 +469,7 @@ void MusicPlayerLibrary::FAudioSink::HandleStreamEnd() noexcept
 	}
 	catch (...)
 	{
-		voice_error_.store(FAUDIO_E_FAIL, std::memory_order_release);
-		stream_phase_.store(StreamPhase::error, std::memory_order_release);
+		HandleVoiceError(FAUDIO_E_FAIL, 0);
 	}
 	if (engine_ended_generation != 0)
 	{
@@ -503,8 +485,7 @@ void MusicPlayerLibrary::FAudioSink::HandleStreamEnd() noexcept
 		engine_completed_generation_.store(
 			engine_ended_generation, std::memory_order_release);
 	}
-	if (engine_ended_generation != 0 ||
-		voice_error_.load(std::memory_order_acquire) != 0)
+	if (engine_ended_generation != 0)
 		stream_end_cv_.notify_all();
 }
 
@@ -542,6 +523,27 @@ void MusicPlayerLibrary::FAudioSink::RecordPlaybackClockPoint(
 	point.sequence.store(sequence, std::memory_order_release);
 }
 
+MusicPlayerLibrary::FAudioSink::VoiceProgressSnapshot
+MusicPlayerLibrary::FAudioSink::QueryVoiceProgress() const noexcept
+{
+	VoiceProgressSnapshot result{};
+	if (!source_voice_)
+		return result;
+
+	FAudioVoiceState raw_state{};
+	FAudioSourceVoice_GetState(source_voice_.get(), &raw_state, 0);
+	const auto start_samples = session_start_samples_.load(std::memory_order_acquire);
+	const auto raw_session_samples = raw_state.SamplesPlayed >= start_samples
+		? raw_state.SamplesPlayed - start_samples
+		: 0;
+	result.buffers_queued = raw_state.BuffersQueued;
+	result.submitted_media_frames = submitted_media_frames_.load(
+		std::memory_order_acquire);
+	result.mixed_media_frames = (std::min)(
+		raw_session_samples, result.submitted_media_frames);
+	return result;
+}
+
 void MusicPlayerLibrary::FAudioSink::CapturePlaybackClockPoint() noexcept
 {
 	const auto phase = stream_phase_.load(std::memory_order_acquire);
@@ -554,16 +556,7 @@ void MusicPlayerLibrary::FAudioSink::CapturePlaybackClockPoint() noexcept
 	if (point_generation == 0)
 		return;
 
-	FAudioVoiceState raw_state{};
-	FAudioSourceVoice_GetState(source_voice_, &raw_state, 0);
-	const auto start_samples = session_start_samples_.load(std::memory_order_acquire);
-	const auto raw_session_samples = raw_state.SamplesPlayed >= start_samples
-		? raw_state.SamplesPlayed - start_samples
-		: 0;
-	const auto submitted_media_frames = submitted_media_frames_.load(
-		std::memory_order_acquire);
-	const auto mixed_media_frames = (std::min)(
-		raw_session_samples, submitted_media_frames);
+	const auto voice_progress = QueryVoiceProgress();
 
 	// BeginStream publishes `open` only after its generation baseline is ready,
 	// while AbortStream publishes `aborted` before flushing the voice. Recheck
@@ -579,7 +572,8 @@ void MusicPlayerLibrary::FAudioSink::CapturePlaybackClockPoint() noexcept
 		return;
 	}
 	RecordPlaybackClockPoint(
-		point_generation, PlaybackClockNowNanoseconds(), mixed_media_frames);
+		point_generation, SteadyClockNowNanoseconds(),
+		voice_progress.mixed_media_frames);
 }
 
 bool MusicPlayerLibrary::FAudioSink::ReadPlaybackClockAt(
@@ -655,31 +649,18 @@ void FAUDIOCALL MusicPlayerLibrary::FAudioSink::OnVoiceError(
 	}
 }
 
-MusicPlayerLibrary::AudioDsp::EqualizerDspSnapshot
-MusicPlayerLibrary::FAudioSink::BuildEqualizerSnapshotLocked() const noexcept
-{
-	return AudioDsp::CompileEqualizerSnapshot(
-		equalizer_config_,
-		output_format_.sample_rate,
-		equalizer_reset_generation_,
-		1.0f);
-}
-
 bool MusicPlayerLibrary::FAudioSink::PublishEqualizerSnapshotLocked() noexcept
 {
 	if (!source_voice_)
 		return false;
-	auto snapshot = BuildEqualizerSnapshotLocked();
 	const bool currently_enabled = is_limiter_enabled_.load(
 		std::memory_order_acquire);
-	const bool should_enable = snapshot.enabled_mask != 0;
-	if (should_enable != currently_enabled)
-	{
-		++equalizer_reset_generation_;
-		snapshot = BuildEqualizerSnapshotLocked();
-	}
+	const auto publication = equalizer_settings_.PreparePublication(
+		output_format_.sample_rate, false, currently_enabled);
+	const auto& snapshot = publication.snapshot;
+	const bool should_enable = publication.processing_enabled;
 	if (FAudioVoice_SetEffectParameters(
-		source_voice_, 0, &snapshot, sizeof(snapshot), FAUDIO_COMMIT_NOW) != FAUDIO_OK)
+			source_voice_.get(), 0, &snapshot, sizeof(snapshot), FAUDIO_COMMIT_NOW) != FAUDIO_OK)
 	{
 		return false;
 	}
@@ -688,9 +669,9 @@ bool MusicPlayerLibrary::FAudioSink::PublishEqualizerSnapshotLocked() noexcept
 	{
 		const auto result = should_enable
 			? FAudioVoice_EnableEffect(
-				source_voice_, 0, FAUDIO_COMMIT_NOW)
+				source_voice_.get(), 0, FAUDIO_COMMIT_NOW)
 			: FAudioVoice_DisableEffect(
-				source_voice_, 0, FAUDIO_COMMIT_NOW);
+				source_voice_.get(), 0, FAUDIO_COMMIT_NOW);
 		if (result != FAUDIO_OK)
 			return false;
 	}
@@ -731,20 +712,16 @@ MusicPlayerLibrary::FAudioSink::BeginStream()
 	if (!AbortStreamLocked())
 		throw std::runtime_error("FAudio source voice did not drain during reset");
 	const auto next_generation = generation_.fetch_add(1, std::memory_order_acq_rel) + 1;
-	engine_completed_generation_.store(0, std::memory_order_release);
-	completed_generation_.store(0, std::memory_order_release);
-	engine_end_clock_nanoseconds_.store(0, std::memory_order_release);
+	ResetStreamProgressState();
 	submitted_media_frames_.store(0, std::memory_order_release);
-	last_samples_played_.store(0, std::memory_order_release);
-	last_media_frames_presented_.store(0, std::memory_order_release);
 	voice_error_.store(0, std::memory_order_release);
 	FAudioVoiceState raw_state{};
 	if (source_voice_)
-		FAudioSourceVoice_GetState(source_voice_, &raw_state, 0);
+		FAudioSourceVoice_GetState(source_voice_.get(), &raw_state, 0);
 	session_start_samples_.store(raw_state.SamplesPlayed, std::memory_order_release);
 	{
 		std::lock_guard effect_lock(effect_mutex_);
-		++equalizer_reset_generation_;
+		equalizer_settings_.AdvanceResetGeneration();
 		(void)PublishEqualizerSnapshotLocked();
 	}
 	// Publish open only after the generation clock baseline and effect reset are
@@ -804,7 +781,8 @@ bool MusicPlayerLibrary::FAudioSink::Start() noexcept
 		return source_voice_ &&
 			(phase == StreamPhase::open || phase == StreamPhase::draining ||
 				phase == StreamPhase::eos_queued) &&
-			FAudioSourceVoice_Start(source_voice_, 0, FAUDIO_COMMIT_NOW) == FAUDIO_OK;
+			FAudioSourceVoice_Start(
+				source_voice_.get(), 0, FAUDIO_COMMIT_NOW) == FAUDIO_OK;
 	}
 	catch (...)
 	{
@@ -815,7 +793,17 @@ bool MusicPlayerLibrary::FAudioSink::Start() noexcept
 void MusicPlayerLibrary::FAudioSink::Stop() noexcept
 {
 	if (source_voice_)
-		(void)FAudioSourceVoice_Stop(source_voice_, 0, FAUDIO_COMMIT_NOW);
+		(void)FAudioSourceVoice_Stop(
+			source_voice_.get(), 0, FAUDIO_COMMIT_NOW);
+}
+
+void MusicPlayerLibrary::FAudioSink::ResetStreamProgressState() noexcept
+{
+	engine_completed_generation_.store(0, std::memory_order_release);
+	completed_generation_.store(0, std::memory_order_release);
+	engine_end_clock_nanoseconds_.store(0, std::memory_order_release);
+	last_samples_played_.store(0, std::memory_order_release);
+	last_media_frames_presented_.store(0, std::memory_order_release);
 }
 
 bool MusicPlayerLibrary::FAudioSink::AbortStreamLocked() noexcept
@@ -827,7 +815,7 @@ bool MusicPlayerLibrary::FAudioSink::AbortStreamLocked() noexcept
 	{
 		stream_phase_.store(StreamPhase::aborted, std::memory_order_release);
 		Stop();
-		(void)FAudioSourceVoice_FlushSourceBuffers(source_voice_);
+		(void)FAudioSourceVoice_FlushSourceBuffers(source_voice_.get());
 		std::unique_lock lock(buffer_mutex_);
 		if (pending_eos_callback_)
 		{
@@ -841,28 +829,20 @@ bool MusicPlayerLibrary::FAudioSink::AbortStreamLocked() noexcept
 			});
 		if (!drained)
 		{
-			voice_error_.store(FAUDIO_E_FAIL, std::memory_order_release);
-			stream_phase_.store(StreamPhase::error, std::memory_order_release);
-			stream_end_cv_.notify_all();
+			HandleVoiceError(FAUDIO_E_FAIL, 0);
 			return false;
 		}
 		completed_tail_probe_serial_ = 0;
 		completed_tail_probe_generation_ = 0;
 		completed_tail_probe_process_sequence_ = 0;
-		engine_completed_generation_.store(0, std::memory_order_release);
-		completed_generation_.store(0, std::memory_order_release);
-		engine_end_clock_nanoseconds_.store(0, std::memory_order_release);
-		last_samples_played_.store(0, std::memory_order_release);
-		last_media_frames_presented_.store(0, std::memory_order_release);
+		ResetStreamProgressState();
 		aborting_.store(false, std::memory_order_release);
 		stream_end_cv_.notify_all();
 		return true;
 	}
 	catch (...)
 	{
-		voice_error_.store(FAUDIO_E_FAIL, std::memory_order_release);
-		stream_phase_.store(StreamPhase::error, std::memory_order_release);
-		stream_end_cv_.notify_all();
+		HandleVoiceError(FAUDIO_E_FAIL, 0);
 		return false;
 	}
 }
@@ -876,9 +856,7 @@ void MusicPlayerLibrary::FAudioSink::AbortStream() noexcept
 	}
 	catch (...)
 	{
-		voice_error_.store(FAUDIO_E_FAIL, std::memory_order_release);
-		stream_phase_.store(StreamPhase::error, std::memory_order_release);
-		stream_end_cv_.notify_all();
+		HandleVoiceError(FAUDIO_E_FAIL, 0);
 	}
 }
 
@@ -902,19 +880,11 @@ MusicPlayerLibrary::FAudioSink::GetState() const noexcept
 		return result;
 	}
 
-	FAudioVoiceState raw_state{};
-	FAudioSourceVoice_GetState(source_voice_, &raw_state, 0);
-	const auto start_samples = session_start_samples_.load(std::memory_order_acquire);
-	const auto raw_session_samples = raw_state.SamplesPlayed >= start_samples
-		? raw_state.SamplesPlayed - start_samples
-		: 0;
-	result.buffers_queued = raw_state.BuffersQueued;
-	const auto submitted_media_frames = submitted_media_frames_.load(
-		std::memory_order_acquire);
-	const auto mixed_media_frames = (std::min)(
-		raw_session_samples, submitted_media_frames);
+	const auto voice_progress = QueryVoiceProgress();
+	result.buffers_queued = voice_progress.buffers_queued;
+	const auto submitted_media_frames = voice_progress.submitted_media_frames;
 	result.samples_played = PublishMonotonic(
-		last_samples_played_, mixed_media_frames);
+		last_samples_played_, voice_progress.mixed_media_frames);
 	const auto device_rate = device_->GetOutputFormat().sample_rate;
 	const auto device_latency = device_->GetCurrentLatencyInSamples();
 	const auto converted_device_latency = device_rate > 0
@@ -926,9 +896,7 @@ MusicPlayerLibrary::FAudioSink::GetState() const noexcept
 		std::memory_order_acquire);
 	const auto presentation_latency = converted_device_latency +
 		effect_latency_frames;
-	result.presentation_latency_frames = static_cast<std::uint32_t>((std::min)(
-		presentation_latency,
-		static_cast<std::uint64_t>((std::numeric_limits<std::uint32_t>::max)())));
+	result.presentation_latency_frames = SaturateToUint32(presentation_latency);
 	// Select an actual FAudio processing-pass sample in time instead of deriving
 	// delay from source queue depth. This remains correct across prefetch bursts,
 	// pauses and underruns because no query-time points are inserted.
@@ -944,7 +912,7 @@ MusicPlayerLibrary::FAudioSink::GetState() const noexcept
 		std::chrono::duration_cast<std::chrono::nanoseconds>(
 			std::chrono::duration<double>(latency_seconds)).count();
 	const auto presentation_time_nanoseconds =
-		PlaybackClockNowNanoseconds() - latency_nanoseconds;
+		SteadyClockNowNanoseconds() - latency_nanoseconds;
 	std::uint64_t presented_media_frames = 0;
 	(void)ReadPlaybackClockAt(
 		result.generation,
@@ -1028,22 +996,16 @@ void MusicPlayerLibrary::FAudioSink::SetMasterVolume(const float volume) noexcep
 
 int MusicPlayerLibrary::FAudioSink::GetEqualizerBand(const int index) const noexcept
 {
-	if (index < 0 || static_cast<std::size_t>(index) >= AudioDsp::EqualizerBandCount)
-		return 0;
 	std::lock_guard effect_lock(effect_mutex_);
-	return static_cast<int>(equalizer_config_.bands[index].gain_db);
+	return equalizer_settings_.GetBand(index);
 }
 
 void MusicPlayerLibrary::FAudioSink::SetEqualizerBand(int index, int value) noexcept
 {
-	if (index < 0 || static_cast<std::size_t>(index) >= AudioDsp::EqualizerBandCount)
-		return;
-	value = std::clamp(value, -24, 24);
 	std::lock_guard submit_lock(submit_mutex_);
 	std::lock_guard effect_lock(effect_mutex_);
-	if (equalizer_config_.bands[index].gain_db == static_cast<float>(value))
+	if (!equalizer_settings_.SetBand(index, value))
 		return;
-	equalizer_config_.bands[index].gain_db = static_cast<float>(value);
 	const auto phase = stream_phase_.load(std::memory_order_acquire);
 	// Once EOS draining starts, changing the effect's enabled state can prevent
 	// the FAPO process-sequence barrier from ever advancing. Keep the effect
@@ -1051,6 +1013,11 @@ void MusicPlayerLibrary::FAudioSink::SetEqualizerBand(int index, int value) noex
 	if (phase == StreamPhase::draining || phase == StreamPhase::eos_queued)
 		return;
 	(void)PublishEqualizerSnapshotLocked();
+}
+
+bool MusicPlayerLibrary::FAudioSink::IsExclusiveModeEnabled() noexcept
+{
+	return false;
 }
 
 MusicPlayerLibrary::FAudioSink::~FAudioSink()

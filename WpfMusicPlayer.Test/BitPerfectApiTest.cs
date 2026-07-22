@@ -26,7 +26,7 @@ public sealed class BitPerfectApiTest
     }
 
     [TestMethod]
-    public void ExactPcmRoute_TracksEqualizerLimiterState()
+    public void ExactPcmRoute_OnSharedFAudioNeverReportsBitPerfect()
     {
         var path = CreatePcm16WaveFile(48_000);
         try
@@ -34,13 +34,13 @@ public sealed class BitPerfectApiTest
             using var player = new MusicPlayerManaged(48_000, 2, 16);
             player.OpenFile(path);
 
-            Assert.IsTrue(
+            Assert.IsFalse(
                 player.IsBitPerfect(),
-                $"Source={player.GetAudioSourceFormat()}, Sink={player.GetDeviceOutputFormat()}");
+                $"Shared FAudio must not report bit-perfect. Source={player.GetAudioSourceFormat()}, Sink={player.GetDeviceOutputFormat()}");
             player.SetEqualizerBand(5, 6);
             Assert.IsFalse(player.IsBitPerfect());
             player.SetEqualizerBand(5, 0);
-            Assert.IsTrue(player.IsBitPerfect());
+            Assert.IsFalse(player.IsBitPerfect());
 
 			using var stopped = new ManualResetEventSlim();
 			Exception? playbackError = null;
@@ -53,9 +53,9 @@ public sealed class BitPerfectApiTest
 			player.Start();
 			Assert.IsTrue(
 				stopped.Wait(TimeSpan.FromSeconds(10)),
-				"Bit-perfect playback did not reach its natural EOS.");
+				"Shared FAudio playback did not reach its natural EOS.");
 			Assert.IsNull(playbackError, playbackError?.ToString());
-			Assert.IsTrue(player.IsBitPerfect());
+			Assert.IsFalse(player.IsBitPerfect());
         }
         finally
         {

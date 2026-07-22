@@ -66,6 +66,8 @@ namespace WpfMusicPlayer.Services.Implementations
                 },
                 Audio = new AudioSettings
                 {
+                    Backend = AudioSettings.BackendType.FAudio,
+                    OutputDeviceId = string.Empty,
                     Channel = systemFormat.Channel,
                     BitDepth = systemFormat.BitDepth,
                     SampleRate = systemFormat.SampleRate

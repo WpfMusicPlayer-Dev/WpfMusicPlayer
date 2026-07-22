@@ -3,6 +3,7 @@
 #pragma once
 
 #include <chrono>
+#include <cstdarg>
 #include <mutex>
 #include <string>
 #include "Core/NativeLogWriter.h"
@@ -21,16 +22,11 @@ public:
     void Disable();
     [[nodiscard]] bool IsEnabled() const { return enable_redirect; }
 
-    void flush_stream();
-
     void SetIncludeTimestamp(bool include) { timestamp_enable = include; }
     void SetIncludeFileInfo(bool include) { info_enable = include; }
 
     void TraceEx(const char* file_name, int line_num, const wchar_t* format, ...) noexcept;
     void TraceEx(const char* file_name, int line_num, const char* format, ...) noexcept;
-
-    void Trace(const wchar_t* format, ...) noexcept;
-    void Trace(const char* format, ...) noexcept;
 
     static NativeTraceRedirect* GetTraceRedirector();
     static void SetTraceRedirector(NativeTraceRedirect*);
@@ -43,6 +39,26 @@ private:
 
     std::string format_message_va(const wchar_t* format, va_list args);
     std::string format_message_va(const char* format, va_list args);
+
+    template <typename Character>
+    void trace_va(
+        const char* file_name,
+        int line_num,
+        const Character* format,
+        va_list args) noexcept
+    {
+        if (!enable_redirect || format == nullptr)
+            return;
+
+        try
+        {
+            const std::string message = format_message_va(format, args);
+            write_log(file_name, line_num, message.c_str());
+        }
+        catch (...)
+        {
+        }
+    }
 
     bool enable_redirect;
     bool timestamp_enable;
@@ -60,12 +76,6 @@ private:
         } \
     } while(0)
 
-#define NATIVE_TRACE_REDIRECT(redirector, fmt, ...) \
-    do { \
-        if ((redirector) != nullptr) { \
-            (redirector)->Trace(fmt, __VA_ARGS__); \
-        } \
-    } while(0)
 #if defined(NATIVE_TRACE_REDIRECT_ENABLED)
 #if defined(NATIVE_TRACE)
 #undef NATIVE_TRACE

@@ -3,12 +3,15 @@
 #include "pch.h"
 
 #include "Audio/AudioOutputFormat.h"
+#include "Audio/FAudioResource.h"
 
+#include <array>
 #include <bit>
 #include <cmath>
 #include <cstring>
 #include <limits>
 #include <stdexcept>
+#include <string_view>
 
 #if defined(__cplusplus)
 extern "C" {
@@ -21,50 +24,58 @@ extern "C" {
 namespace
 {
 	using namespace MusicPlayerLibrary;
-	constexpr FAudioGUID PcmSubFormat{
-		0x00000001, 0x0000, 0x0010,
-		{0x80, 0x00, 0x00, 0xaa, 0x00, 0x38, 0x9b, 0x71}
-	};
-	constexpr FAudioGUID IeeeFloatSubFormat{
-		0x00000003, 0x0000, 0x0010,
-		{0x80, 0x00, 0x00, 0xaa, 0x00, 0x38, 0x9b, 0x71}
+
+	struct AudioChannelDescriptor final
+	{
+		AudioChannelMode mode;
+		std::uint16_t channel_count;
+		std::uint32_t primary_mask;
+		std::uint32_t alternate_mask;
+		std::string_view ffmpeg_layout;
+		bool accepts_unspecified_mask;
 	};
 
-	bool SameGuid(const FAudioGUID& left, const FAudioGUID& right) noexcept
+	constexpr std::array AudioChannelDescriptors{
+		AudioChannelDescriptor{
+			AudioChannelMode::Mono, 1, SPEAKER_MONO, 0, "mono", true },
+		AudioChannelDescriptor{
+			AudioChannelMode::Stereo, 2, SPEAKER_STEREO, 0, "stereo", true },
+		AudioChannelDescriptor{
+			AudioChannelMode::Surround51, 6, SPEAKER_5POINT1_SURROUND,
+			SPEAKER_5POINT1, "5.1(side)", false },
+		AudioChannelDescriptor{
+			AudioChannelMode::Surround71, 8, SPEAKER_7POINT1_SURROUND,
+			SPEAKER_7POINT1, "7.1", false }
+	};
+
+	template <typename Predicate>
+	[[nodiscard]] constexpr const AudioChannelDescriptor*
+		FindAudioChannelDescriptor(Predicate&& matches) noexcept
 	{
-		return std::memcmp(&left, &right, sizeof(FAudioGUID)) == 0;
+		for (const auto& descriptor : AudioChannelDescriptors)
+		{
+			if (matches(descriptor))
+				return &descriptor;
+		}
+		return nullptr;
 	}
 
 	std::uint32_t DefaultChannelMask(const int channels) noexcept
 	{
-		switch (channels)
-		{
-		case 1: return SPEAKER_MONO;
-		case 2: return SPEAKER_STEREO;
-		case 6: return SPEAKER_5POINT1_SURROUND;
-		case 8: return SPEAKER_7POINT1_SURROUND;
-		default: return 0;
-		}
+		const auto* descriptor = FindAudioChannelDescriptor(
+			[channels](const AudioChannelDescriptor& candidate)
+			{ return candidate.channel_count == channels; });
+		return descriptor != nullptr ? descriptor->primary_mask : 0;
 	}
 
 	std::string DescribeChannelLayout(const std::uint32_t mask, const int channels)
 	{
-		switch (channels)
+		const auto* descriptor = FindAudioChannelDescriptor(
+			[channels](const AudioChannelDescriptor& candidate)
+			{ return candidate.channel_count == channels; });
+		if (descriptor != nullptr && mask == descriptor->primary_mask)
 		{
-		case 1:
-			if (mask == SPEAKER_MONO) return "mono";
-			break;
-		case 2:
-			if (mask == SPEAKER_STEREO) return "stereo";
-			break;
-		case 6:
-			if (mask == SPEAKER_5POINT1_SURROUND) return "5.1(side)";
-			break;
-		case 8:
-			if (mask == SPEAKER_7POINT1_SURROUND) return "7.1";
-			break;
-		default:
-			break;
+			return std::string(descriptor->ffmpeg_layout);
 		}
 
 		AVChannelLayout layout{};
@@ -91,22 +102,44 @@ namespace
 		throw std::invalid_argument("Unsupported system audio channel layout");
 	}
 
-	FAudioWaveFormatExtensible FallbackSystemFormat() noexcept
-	{
-		FAudioWaveFormatExtensible result{};
-		result.Format.wFormatTag = FAUDIO_FORMAT_EXTENSIBLE;
-		result.Format.nChannels = 2;
-		result.Format.nSamplesPerSec = 48000;
-		result.Format.wBitsPerSample = 32;
-		result.Format.nBlockAlign = 8;
-		result.Format.nAvgBytesPerSec = 384000;
-		result.Format.cbSize = sizeof(FAudioWaveFormatExtensible) - sizeof(FAudioWaveFormatEx);
-		result.Samples.wValidBitsPerSample = 32;
-		result.dwChannelMask = SPEAKER_STEREO;
-		result.SubFormat = IeeeFloatSubFormat;
-		return result;
-	}
+}
 
+bool MusicPlayerLibrary::GuidEquals(
+	const FAudioGUID& left,
+	const FAudioGUID& right) noexcept
+{
+	return std::memcmp(&left, &right, sizeof(FAudioGUID)) == 0;
+}
+
+bool MusicPlayerLibrary::AreResolvedPcmFormatsEqual(
+	const AudioOutputFormat& left,
+	const AudioOutputFormat& right) noexcept
+{
+	return left.sample_rate == right.sample_rate &&
+		left.channel_count == right.channel_count &&
+		left.channel_mask == right.channel_mask &&
+		left.bit_depth == right.bit_depth &&
+		left.sample_format == right.sample_format &&
+		left.wave_format.Format.nBlockAlign ==
+			right.wave_format.Format.nBlockAlign;
+}
+
+FAudioWaveFormatExtensible
+MusicPlayerLibrary::MakeFallbackAudioWaveFormat() noexcept
+{
+	FAudioWaveFormatExtensible result{};
+	result.Format.wFormatTag = FAUDIO_FORMAT_EXTENSIBLE;
+	result.Format.nChannels = 2;
+	result.Format.nSamplesPerSec = StandardAudioSampleRate;
+	result.Format.wBitsPerSample = 32;
+	result.Format.nBlockAlign = 2 * sizeof(float);
+	result.Format.nAvgBytesPerSec =
+		result.Format.nSamplesPerSec * result.Format.nBlockAlign;
+	result.Format.cbSize = FAudioExtensibleFormatExtraSize;
+	result.Samples.wValidBitsPerSample = 32;
+	result.dwChannelMask = SPEAKER_STEREO;
+	result.SubFormat = IeeeFloatAudioSubFormat;
+	return result;
 }
 
 MusicPlayerLibrary::AudioOutputFormat MusicPlayerLibrary::ResolveAudioOutputFormat(
@@ -120,31 +153,10 @@ MusicPlayerLibrary::AudioOutputFormat MusicPlayerLibrary::ResolveAudioOutputForm
 		? requested.requested_sample_rate
 		: static_cast<int>(system_wfx.nSamplesPerSec);
 	if (result.sample_rate <= 0)
-		result.sample_rate = 48'000;
+		result.sample_rate = StandardAudioSampleRate;
 
-	switch (requested.requested_channel_mode)
+	if (requested.requested_channel_mode == AudioChannelMode::System)
 	{
-	case AudioChannelMode::Mono:
-		result.channel_count = 1;
-		result.channel_mask = SPEAKER_MONO;
-		result.ffmpeg_channel_layout = "mono";
-		break;
-	case AudioChannelMode::Stereo:
-		result.channel_count = 2;
-		result.channel_mask = SPEAKER_STEREO;
-		result.ffmpeg_channel_layout = "stereo";
-		break;
-	case AudioChannelMode::Surround51:
-		result.channel_count = 6;
-		result.channel_mask = SPEAKER_5POINT1_SURROUND;
-		result.ffmpeg_channel_layout = "5.1(side)";
-		break;
-	case AudioChannelMode::Surround71:
-		result.channel_count = 8;
-		result.channel_mask = SPEAKER_7POINT1_SURROUND;
-		result.ffmpeg_channel_layout = "7.1";
-		break;
-	case AudioChannelMode::System:
 		result.channel_count = system_wfx.nChannels;
 		if (result.channel_count == 0)
 			result.channel_count = 2;
@@ -156,8 +168,18 @@ MusicPlayerLibrary::AudioOutputFormat MusicPlayerLibrary::ResolveAudioOutputForm
 		}
 		result.ffmpeg_channel_layout = DescribeChannelLayout(
 			result.channel_mask, result.channel_count);
-		break;
-	default:
+	}
+	else if (const auto* descriptor = FindAudioChannelDescriptor(
+		[mode = requested.requested_channel_mode](
+			const AudioChannelDescriptor& candidate)
+		{ return candidate.mode == mode; }))
+	{
+		result.channel_count = descriptor->channel_count;
+		result.channel_mask = descriptor->primary_mask;
+		result.ffmpeg_channel_layout = descriptor->ffmpeg_layout;
+	}
+	else
+	{
 		throw std::invalid_argument("Unsupported audio channel mode");
 	}
 
@@ -165,10 +187,10 @@ MusicPlayerLibrary::AudioOutputFormat MusicPlayerLibrary::ResolveAudioOutputForm
 	{
 		const bool system_is_float = system_wfx.wFormatTag == FAUDIO_FORMAT_IEEE_FLOAT ||
 			(system_wfx.wFormatTag == FAUDIO_FORMAT_EXTENSIBLE &&
-				SameGuid(system_format.SubFormat, IeeeFloatSubFormat));
+				GuidEquals(system_format.SubFormat, IeeeFloatAudioSubFormat));
 		std::uint16_t system_valid_bits = system_wfx.wBitsPerSample;
 		if (system_wfx.wFormatTag == FAUDIO_FORMAT_EXTENSIBLE &&
-			SameGuid(system_format.SubFormat, PcmSubFormat) &&
+			GuidEquals(system_format.SubFormat, PcmAudioSubFormat) &&
 			system_format.Samples.wValidBitsPerSample > 0 &&
 			system_format.Samples.wValidBitsPerSample <= system_wfx.wBitsPerSample)
 		{
@@ -216,24 +238,25 @@ MusicPlayerLibrary::AudioOutputFormat MusicPlayerLibrary::ResolveAudioOutputForm
 		result.channel_count * container_bits / 8);
 	wave_format.Format.nAvgBytesPerSec =
 		wave_format.Format.nSamplesPerSec * wave_format.Format.nBlockAlign;
-	wave_format.Format.cbSize = sizeof(FAudioWaveFormatExtensible) - sizeof(FAudioWaveFormatEx);
+	wave_format.Format.cbSize = FAudioExtensibleFormatExtraSize;
 	wave_format.Samples.wValidBitsPerSample = valid_bits;
 	wave_format.dwChannelMask = result.channel_mask;
-	wave_format.SubFormat = use_float ? IeeeFloatSubFormat : PcmSubFormat;
+	wave_format.SubFormat = use_float
+		? IeeeFloatAudioSubFormat
+		: PcmAudioSubFormat;
 	return result;
 }
 
 MusicPlayerLibrary::AudioOutputFormat MusicPlayerLibrary::ResolveAudioOutputFormat(
 	const AudioOutputFormat& requested)
 {
-	FAudioWaveFormatExtensible system_format = FallbackSystemFormat();
-	FAudio* query_engine = nullptr;
-	if (FAudioCreate(&query_engine, 0, FAUDIO_DEFAULT_PROCESSOR) == FAUDIO_OK)
+	FAudioWaveFormatExtensible system_format = MakeFallbackAudioWaveFormat();
+	auto query_engine = TryCreateFAudioEngine();
+	if (query_engine)
 	{
 		FAudioDeviceDetails details{};
-		if (FAudio_GetDeviceDetails(query_engine, 0, &details) == FAUDIO_OK)
+		if (FAudio_GetDeviceDetails(query_engine.get(), 0, &details) == FAUDIO_OK)
 			system_format = details.OutputFormat;
-		FAudio_Release(query_engine);
 	}
 	return ResolveAudioOutputFormat(requested, system_format);
 }
@@ -242,32 +265,16 @@ int MusicPlayerLibrary::GetAudioChannelTypeId(
 	const int channel_count,
 	const std::uint64_t channel_mask) noexcept
 {
-	switch (channel_count)
+	const auto* descriptor = FindAudioChannelDescriptor(
+		[channel_count](const AudioChannelDescriptor& candidate)
+		{ return candidate.channel_count == channel_count; });
+	if (descriptor != nullptr &&
+		(channel_mask == descriptor->primary_mask ||
+			(descriptor->accepts_unspecified_mask && channel_mask == 0) ||
+			(descriptor->alternate_mask != 0 &&
+				channel_mask == descriptor->alternate_mask)))
 	{
-	case 1:
-		if (channel_mask == 0 || channel_mask == SPEAKER_MONO)
-			return static_cast<int>(AudioChannelMode::Mono);
-		break;
-	case 2:
-		if (channel_mask == 0 || channel_mask == SPEAKER_STEREO)
-			return static_cast<int>(AudioChannelMode::Stereo);
-		break;
-	case 6:
-		if (channel_mask == SPEAKER_5POINT1 ||
-			channel_mask == SPEAKER_5POINT1_SURROUND)
-		{
-			return static_cast<int>(AudioChannelMode::Surround51);
-		}
-		break;
-	case 8:
-		if (channel_mask == SPEAKER_7POINT1 ||
-			channel_mask == SPEAKER_7POINT1_SURROUND)
-		{
-			return static_cast<int>(AudioChannelMode::Surround71);
-		}
-		break;
-	default:
-		break;
+		return static_cast<int>(descriptor->mode);
 	}
 	return static_cast<int>(AudioChannelMode::Unknown);
 }
@@ -304,14 +311,17 @@ bool MusicPlayerLibrary::AreAudioFormatsBitPerfect(
 		return false;
 
 	const FAudioGUID* expected_sub_format = nullptr;
+	std::uint16_t expected_legacy_tag = 0;
 	switch (input.sample_format)
 	{
 	case AV_SAMPLE_FMT_S16:
 	case AV_SAMPLE_FMT_S32:
-		expected_sub_format = &PcmSubFormat;
+		expected_sub_format = &PcmAudioSubFormat;
+		expected_legacy_tag = FAUDIO_FORMAT_PCM;
 		break;
 	case AV_SAMPLE_FMT_FLT:
-		expected_sub_format = &IeeeFloatSubFormat;
+		expected_sub_format = &IeeeFloatAudioSubFormat;
+		expected_legacy_tag = FAUDIO_FORMAT_IEEE_FLOAT;
 		break;
 	default:
 		return false;
@@ -322,26 +332,33 @@ bool MusicPlayerLibrary::AreAudioFormatsBitPerfect(
 		input.channel_count) * static_cast<std::uint32_t>(bytes_per_sample);
 	const auto expected_average_bytes = static_cast<std::uint64_t>(
 		input.sample_rate) * expected_block_align;
-	if (wave.Format.wFormatTag != FAUDIO_FORMAT_EXTENSIBLE ||
-		wave.Format.cbSize !=
-			sizeof(FAudioWaveFormatExtensible) - sizeof(FAudioWaveFormatEx) ||
-		wave.Format.nSamplesPerSec != static_cast<std::uint32_t>(output.sample_rate) ||
+	if (wave.Format.nSamplesPerSec != static_cast<std::uint32_t>(output.sample_rate) ||
 		wave.Format.nChannels != output.channel_count ||
-		wave.dwChannelMask != output.channel_mask ||
-		!SameGuid(wave.SubFormat, *expected_sub_format) ||
 		expected_block_align > (std::numeric_limits<std::uint16_t>::max)() ||
 		expected_average_bytes > (std::numeric_limits<std::uint32_t>::max)() ||
-		output.wave_format.Format.wBitsPerSample != bytes_per_sample * 8 ||
-		output.wave_format.Samples.wValidBitsPerSample != input.bit_depth ||
-		output.wave_format.Samples.wValidBitsPerSample >
-			output.wave_format.Format.wBitsPerSample ||
-		output.wave_format.Samples.wValidBitsPerSample !=
-			static_cast<std::uint16_t>(output.bit_depth) ||
-		output.wave_format.Format.nBlockAlign != expected_block_align ||
-		output.wave_format.Format.nAvgBytesPerSec != expected_average_bytes)
+		wave.Format.wBitsPerSample != bytes_per_sample * 8 ||
+		wave.Format.nBlockAlign != expected_block_align ||
+		wave.Format.nAvgBytesPerSec != expected_average_bytes)
 	{
 		return false;
 	}
+
+	const bool is_extensible =
+		wave.Format.wFormatTag == FAUDIO_FORMAT_EXTENSIBLE &&
+		wave.Format.cbSize == FAudioExtensibleFormatExtraSize &&
+		wave.dwChannelMask == output.channel_mask &&
+		GuidEquals(wave.SubFormat, *expected_sub_format) &&
+		wave.Samples.wValidBitsPerSample == input.bit_depth &&
+		wave.Samples.wValidBitsPerSample <= wave.Format.wBitsPerSample &&
+		wave.Samples.wValidBitsPerSample ==
+			static_cast<std::uint16_t>(output.bit_depth);
+	const bool is_legacy =
+		output.channel_count <= 2 &&
+		wave.Format.wFormatTag == expected_legacy_tag &&
+		wave.Format.cbSize == 0 &&
+		input.bit_depth == bytes_per_sample * 8;
+	if (!is_extensible && !is_legacy)
+		return false;
 
 	return input.sample_rate == output.sample_rate &&
 		input.channel_count == output.channel_count &&
@@ -415,5 +432,5 @@ bool MusicPlayerLibrary::IsLoselessAudio(
 
 bool MusicPlayerLibrary::IsHiResAudio(const int source_sample_rate) noexcept
 {
-	return source_sample_rate > 48000;
+	return source_sample_rate > StandardAudioSampleRate;
 }

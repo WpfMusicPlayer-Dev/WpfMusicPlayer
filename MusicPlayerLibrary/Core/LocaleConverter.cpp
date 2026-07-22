@@ -2,15 +2,24 @@
 
 #include "pch.h"
 #include "Core/LocaleConverter.h"
+#include "Core/StringUtilities.h"
+#include "Core/Utf16Conversion.h"
 
 #include <iconv.h>
 #include <uchardet/uchardet.h>
 
-#include <cctype>
+#include <cstring>
 #include <limits>
+#include <memory>
+#include <optional>
+#include <type_traits>
+#include <utility>
 
 namespace
 {
+constexpr char Utf8Encoding[] = "UTF-8";
+constexpr char Utf16LeEncoding[] = "UTF-16LE";
+
 bool IsUtf8ContinuationByte(unsigned char value)
 {
     return (value & 0xC0) == 0x80;
@@ -135,33 +144,105 @@ bool IsAsciiBytes(const char* input, size_t size)
     return true;
 }
 
-bool EqualsAsciiIgnoreCase(const char* left, const char* right)
-{
-    if (!left || !right)
-        return left == right;
+using UCharDetElement = std::remove_pointer_t<uchardet_t>;
 
-    while (*left != '\0' && *right != '\0')
+struct UCharDetDeleter final
+{
+    void operator()(UCharDetElement* detector) const noexcept
     {
-        const auto left_char = static_cast<unsigned char>(*left);
-        const auto right_char = static_cast<unsigned char>(*right);
-        if (std::tolower(left_char) != std::tolower(right_char))
-            return false;
-        ++left;
-        ++right;
+        if (detector != nullptr)
+            uchardet_delete(detector);
     }
-    return *left == *right;
+};
+
+using UniqueUCharDet = std::unique_ptr<UCharDetElement, UCharDetDeleter>;
+
+std::string DetectCharset(const char* input, const size_t size)
+{
+    UniqueUCharDet detector(uchardet_new());
+    if (!detector || uchardet_handle_data(detector.get(), input, size) != 0)
+        return {};
+
+    uchardet_data_end(detector.get());
+    const char* charset = uchardet_get_charset(detector.get());
+    return charset != nullptr ? std::string(charset) : std::string{};
 }
 
-bool IsUtf8CompatibleCharset(const char* charset)
+class IconvHandle final
 {
-    if (!charset || strlen(charset) == 0)
+    iconv_t value_;
+
+public:
+    IconvHandle(const char* destination_encoding, const char* source_encoding) noexcept :
+        value_(iconv_open(destination_encoding, source_encoding))
+    {
+    }
+
+    ~IconvHandle()
+    {
+        if (*this)
+            iconv_close(value_);
+    }
+
+    IconvHandle(const IconvHandle&) = delete;
+    IconvHandle& operator=(const IconvHandle&) = delete;
+
+    [[nodiscard]] explicit operator bool() const noexcept
+    {
+        return value_ != reinterpret_cast<iconv_t>(-1);
+    }
+
+    [[nodiscard]] iconv_t Get() const noexcept { return value_; }
+};
+
+std::optional<std::string> ConvertEncoding(
+    const char* input,
+    const size_t input_size,
+    const char* destination_encoding,
+    const char* source_encoding,
+    const size_t output_capacity_multiplier)
+{
+    if (input_size == 0)
+        return std::string{};
+    if (input == nullptr || output_capacity_multiplier == 0 ||
+        input_size > (std::numeric_limits<size_t>::max)() /
+            output_capacity_multiplier)
+    {
+        return std::nullopt;
+    }
+
+    IconvHandle converter(destination_encoding, source_encoding);
+    if (!converter)
+        return std::nullopt;
+
+    size_t input_left = input_size;
+    const size_t output_capacity = input_size * output_capacity_multiplier;
+    size_t output_left = output_capacity;
+    std::string output(output_capacity, '\0');
+    char* input_cursor = const_cast<char*>(input);
+    char* output_cursor = output.data();
+    if (iconv(
+        converter.Get(), &input_cursor, &input_left,
+        &output_cursor, &output_left) == static_cast<size_t>(-1))
+    {
+        return std::nullopt;
+    }
+
+    output.resize(output_capacity - output_left);
+    return output;
+}
+
+bool IsUtf8CompatibleCharset(const std::string_view charset)
+{
+    if (charset.empty())
         return true;
 
-    return EqualsAsciiIgnoreCase(charset, "UTF-8")
-        || EqualsAsciiIgnoreCase(charset, "ASCII")
-        || EqualsAsciiIgnoreCase(charset, "US-ASCII")
-        || EqualsAsciiIgnoreCase(charset, "ANSI")
-        || EqualsAsciiIgnoreCase(charset, "ANSI_X3.4-1968");
+    return MusicPlayerLibrary::EqualsAsciiIgnoreCase(charset, std::string_view(Utf8Encoding))
+        || MusicPlayerLibrary::EqualsAsciiIgnoreCase(charset, std::string_view("ASCII"))
+        || MusicPlayerLibrary::EqualsAsciiIgnoreCase(charset, std::string_view("US-ASCII"))
+        || MusicPlayerLibrary::EqualsAsciiIgnoreCase(charset, std::string_view("ANSI"))
+        || MusicPlayerLibrary::EqualsAsciiIgnoreCase(
+			charset, std::string_view("ANSI_X3.4-1968"));
 }
 }
 
@@ -169,68 +250,34 @@ std::string MusicPlayerLibrary::LocaleConverter::GetUtf8StringFromBytes(const ch
 {
     if (!input || size == 0) return {};
 
-    auto uc_checker = uchardet_new();
-    // 调用者负责约束input的有效性，因此不需要复制
-    uchardet_handle_data(uc_checker, input, size);
-    uchardet_data_end(uc_checker);
-    const char* charset = uchardet_get_charset(uc_checker);
-    NATIVE_TRACE("info: detected charset = %s\n", charset);
+    const std::string charset = DetectCharset(input, size);
+    NATIVE_TRACE("info: detected charset = %s\n", charset.c_str());
     
     // if is utf-8 or ansi...
     // ansi is a subset of UTF-8
     // conversion guard
-    if (!charset || strlen(charset) == 0 || EqualsAsciiIgnoreCase(charset, "UTF-8")) {
-        uchardet_delete(uc_checker);
+	if (charset.empty() ||
+		MusicPlayerLibrary::EqualsAsciiIgnoreCase(
+			std::string_view(charset), std::string_view(Utf8Encoding))) {
         return std::string(input, size);
     }
 
-    iconv_t iconver = iconv_open("UTF-8", charset);
-    // fix: release uc_checker
-    uchardet_delete(uc_checker);
-
-    if (iconver == reinterpret_cast<iconv_t>(-1)) {
-        return std::string(input, size);
-    }
-
-    size_t insize = size;
-    // UTF-8 encoding may expand to 4*in_size
-    size_t outcapacity = size * 4; 
-    size_t outleft = outcapacity;
-    
-    std::string outbuf(outcapacity, '\0');
-    char* pOriginalStart = outbuf.data();
-    char* pIn = const_cast<char*>(input);
-    char* pOut = pOriginalStart;
-
-    size_t res = iconv(iconver, &pIn, &insize, &pOut, &outleft);
-    
-    // fix: release iconver
-    iconv_close(iconver); 
-
-    if (res == static_cast<size_t>(-1)) {
-        return std::string(input, size);
-    }
-
-    // Shrink actualSize to fit
-    size_t actualSize = outcapacity - outleft;
-    outbuf.resize(actualSize); 
-
-    return outbuf;
+	const auto converted = ConvertEncoding(
+		input, size, Utf8Encoding, charset.c_str(), 4);
+	return converted ? std::move(*converted) : std::string(input, size);
 }
 
 bool MusicPlayerLibrary::LocaleConverter::IsUtf8CompatibleBytes(const char* input, size_t size)
 {
     if (!input || size == 0) return true;
 
-    auto uc_checker = uchardet_new();
-    uchardet_handle_data(uc_checker, input, size);
-    uchardet_data_end(uc_checker);
-    const char* charset = uchardet_get_charset(uc_checker);
-    NATIVE_TRACE("info: detected charset for UTF-8 validation = %s\n", charset);
+    const std::string charset = DetectCharset(input, size);
+    NATIVE_TRACE(
+		"info: detected charset for UTF-8 validation = %s\n",
+		charset.c_str());
 
     const bool charset_compatible = IsUtf8CompatibleCharset(charset);
     const bool bytes_compatible = IsValidUtf8Bytes(input, size);
-    uchardet_delete(uc_checker);
     return bytes_compatible && (charset_compatible || IsAsciiBytes(input, size));
 }
 
@@ -238,68 +285,21 @@ std::wstring MusicPlayerLibrary::LocaleConverter::GetUtf16StringFromUtf8String(c
 {
     if (input.empty())
         return {};
-    if (input.size() > static_cast<size_t>((std::numeric_limits<int>::max)()))
+
+	static_assert(sizeof(wchar_t) == 2);
+	const auto converted = ConvertEncoding(
+		input.data(), input.size(), Utf16LeEncoding, Utf8Encoding, 2);
+	if (!converted || converted->size() % sizeof(wchar_t) != 0)
         return {};
 
-    iconv_t iconver = iconv_open("UTF-16LE", "UTF-8");
-    
-    if (iconver == reinterpret_cast<iconv_t>(-1)) {
-        return {};
-    }
-
-    size_t insize = input.size();
-    size_t outcapacity = insize * sizeof(wchar_t) * 2;
-    size_t outleft = outcapacity;
-
-    std::wstring outbuf(outcapacity / sizeof(wchar_t), L'\0');
-
-    char* pIn  = const_cast<char*>(input.data());
-    char* pOut = reinterpret_cast<char*>(outbuf.data());
-
-    size_t res = iconv(iconver, &pIn, &insize, &pOut, &outleft);
-    iconv_close(iconver);
-
-    if (res == static_cast<size_t>(-1))
-        return {};
-
-    size_t actualBytes = outcapacity - outleft;
-    outbuf.resize(actualBytes / sizeof(wchar_t));
-    return outbuf;
+	std::wstring result(converted->size() / sizeof(wchar_t), L'\0');
+	std::memcpy(result.data(), converted->data(), converted->size());
+	return result;
 }
 
 std::string MusicPlayerLibrary::LocaleConverter::GetUtf8StringFromUtf16String(const std::wstring& input)
 {
-    if (input.empty())
-        return {};
-    if (input.size() > static_cast<size_t>((std::numeric_limits<int>::max)()))
-        return {};
-
-    iconv_t iconver = iconv_open("UTF-8", "UTF-16LE");
-    
-    if (iconver == reinterpret_cast<iconv_t>(-1)) {
-        return {};
-    }
-
-    size_t insize = input.size() * sizeof(wchar_t);   // must be num of bytes
-    size_t outcapacity = insize * 2;   // UTF-8 encoding may expand to 4*in_size
-    size_t outleft = outcapacity;
-    
-    std::string outbuf(outcapacity, '\0');
-    char* pOriginalStart = outbuf.data();
-    char* pIn = const_cast<char*>(reinterpret_cast<const char*>(input.c_str()));
-    char* pOut = pOriginalStart;
-
-    size_t res = iconv(iconver, &pIn, &insize, &pOut, &outleft);
-    
-    iconv_close(iconver); 
-
-    if (res == static_cast<size_t>(-1)) {
-        return {};
-    }
-
-    // Shrink actualSize to fit
-    size_t actualSize = outcapacity - outleft;
-    outbuf.resize(actualSize); 
-
-    return outbuf;
+	static_assert(sizeof(wchar_t) == sizeof(std::uint16_t));
+	return ConvertUtf16CodeUnitsToUtf8(
+		input.data(), input.size(), false);
 }

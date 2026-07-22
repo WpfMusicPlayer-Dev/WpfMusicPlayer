@@ -3,6 +3,15 @@
 #include "pch.h"
 #include "Managed/MusicPlayerManaged.h"
 
+#include <msclr/marshal_cppstd.h>
+#include <stdexcept>
+#include <vector>
+
+#include "Audio/Pipeline/Device/Common/FAudioOutputDevice.h"
+#if defined(_WIN32)
+#include "Audio/Pipeline/Device/Windows/WasapiExclusiveOutputDevice.h"
+#endif
+
 namespace
 {
 	bool HasAudioFormatInfo(
@@ -21,6 +30,13 @@ namespace
 		return gcnew System::InvalidOperationException(
 			gcnew System::String(message.c_str(), 0, static_cast<int>(message.size()),
 				System::Text::Encoding::UTF8));
+	}
+
+	System::String^ ToManagedUtf8(const std::string& value)
+	{
+		return gcnew System::String(
+			value.c_str(), 0, static_cast<int>(value.size()),
+			System::Text::Encoding::UTF8);
 	}
 }
 
@@ -110,6 +126,44 @@ void MusicPlayerLibrary::MusicPlayerManaged::GetSystemDefaultOutputFormat(
 		channel_type_id = format.channel_type_id;
 		sample_rate = format.sample_rate;
 		bit_depth = format.bit_depth;
+	}
+	catch (const std::exception& exception)
+	{
+		throw ToManagedException(exception);
+	}
+}
+
+array<MusicPlayerLibrary::AudioOutputDeviceInfoManaged^>^
+MusicPlayerLibrary::MusicPlayerManaged::GetAudioOutputDevices(const int backend)
+{
+	try
+	{
+		std::vector<AudioOutputDeviceInfo> devices;
+		switch (static_cast<AudioBackend>(backend))
+		{
+		case AudioBackend::FAudio:
+			devices = FAudioOutputDevice::EnumerateOutputDevices();
+			break;
+#if defined(_WIN32)
+		case AudioBackend::WasapiExclusive:
+			devices = WasapiExclusiveOutputDevice::EnumerateOutputDevices();
+			break;
+#endif
+		default:
+			throw std::invalid_argument("Unsupported audio backend");
+		}
+
+		auto result = gcnew array<AudioOutputDeviceInfoManaged^>(
+			static_cast<int>(devices.size()));
+		for (std::size_t index = 0; index < devices.size(); ++index)
+		{
+			const auto& device = devices[index];
+			result[static_cast<int>(index)] = gcnew AudioOutputDeviceInfoManaged(
+				ToManagedUtf8(device.id),
+				ToManagedUtf8(device.display_name),
+				device.is_default);
+		}
+		return result;
 	}
 	catch (const std::exception& exception)
 	{
@@ -209,6 +263,37 @@ void MusicPlayerLibrary::MusicPlayerManaged::ProcessEvent(int event_type, Object
 		System::Threading::ThreadPool::QueueUserWorkItem(
 			gcnew System::Threading::WaitCallback(
 				this, &MusicPlayerManaged::DrainEventQueue));
+	}
+}
+
+MusicPlayerLibrary::MusicPlayerManaged::MusicPlayerManaged(
+	const int sample_rate,
+	const int channel_mode,
+	const int bit_depth,
+	const int backend,
+	System::String^ output_device_id)
+{
+	try
+	{
+		event_bridge = new MusicPlayerEventBridge(this);
+		AudioOutputFormat requested{};
+		requested.requested_sample_rate = sample_rate;
+		requested.requested_channel_mode = static_cast<AudioChannelMode>(channel_mode);
+		requested.requested_bit_depth = static_cast<AudioBitDepth>(bit_depth);
+		requested.requested_backend = static_cast<AudioBackend>(backend);
+		if (!System::String::IsNullOrEmpty(output_device_id))
+		{
+			requested.requested_device_id =
+				msclr::interop::marshal_as<std::string>(output_device_id);
+		}
+		native_handle = new AudioFile(event_bridge, requested);
+	}
+	catch (const std::exception& exception)
+	{
+		delete event_bridge;
+		event_bridge = nullptr;
+		native_handle = nullptr;
+		throw ToManagedException(exception);
 	}
 }
 
@@ -407,6 +492,12 @@ System::String^ MusicPlayerLibrary::MusicPlayerManaged::GetDeviceOutputFormat()
 	const AudioFormatInfo format = native_handle->GetDeviceOutputFormatInfo();
 	return FormatAudioFormat(
 		format.channel_type_id, format.sample_rate, format.bit_depth);
+}
+
+int MusicPlayerLibrary::MusicPlayerManaged::GetDeviceOutputSampleRate()
+{
+	if (!is_native_valid()) return 0;
+	return native_handle->GetDeviceOutputFormatInfo().sample_rate;
 }
 
 double MusicPlayerLibrary::MusicPlayerManaged::GetAudioSourceBitrate()

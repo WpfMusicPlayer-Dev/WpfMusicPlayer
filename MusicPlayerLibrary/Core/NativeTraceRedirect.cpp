@@ -24,9 +24,7 @@ NativeTraceRedirect::NativeTraceRedirect(std::unique_ptr<MusicPlayerLibrary::INa
 {
 }
 
-NativeTraceRedirect::~NativeTraceRedirect()
-{
-}
+NativeTraceRedirect::~NativeTraceRedirect() = default;
 
 void NativeTraceRedirect::Enable()
 {
@@ -36,10 +34,6 @@ void NativeTraceRedirect::Enable()
 void NativeTraceRedirect::Disable()
 {
     enable_redirect = false;
-}
-
-void NativeTraceRedirect::flush_stream()
-{
 }
 
 std::string NativeTraceRedirect::query_time_stamp() const
@@ -137,70 +131,18 @@ std::string NativeTraceRedirect::format_message_va(const char* format, va_list a
 
 void NativeTraceRedirect::TraceEx(const char* file_name, int line_num, const wchar_t* format, ...) noexcept
 {
-    if (!enable_redirect || format == nullptr)
-        return;
-    
-    try
-    {
-        va_list args;
-        va_start(args, format);
-        std::string message = format_message_va(format, args);
-        va_end(args);
-
-        write_log(file_name, line_num, message.c_str());
-    }
-    catch (...) { }
+    va_list args;
+    va_start(args, format);
+    trace_va(file_name, line_num, format, args);
+    va_end(args);
 }
 
 void NativeTraceRedirect::TraceEx(const char* file_name, int line_num, const char* format, ...) noexcept
 {
-    if (!enable_redirect || format == nullptr)
-        return;
-
-    try
-    {
-        va_list args;
-        va_start(args, format);
-        std::string message = format_message_va(format, args);
-        va_end(args);
-
-        write_log(file_name, line_num, message.c_str());
-    }
-    catch (...) { }
-}
-
-void NativeTraceRedirect::Trace(const wchar_t* format, ...) noexcept
-{
-    if (!enable_redirect || format == nullptr)
-        return;
-
-    try
-    {
-        va_list args;
-        va_start(args, format);
-        std::string message = format_message_va(format, args);
-        va_end(args);
-
-        write_log(nullptr, -1, message.c_str());
-    }
-    catch (...) { }
-}
-
-void NativeTraceRedirect::Trace(const char* format, ...) noexcept
-{
-    if (!enable_redirect || format == nullptr)
-        return;
-
-    try
-    {
-        va_list args;
-        va_start(args, format);
-        std::string message = format_message_va(format, args);
-        va_end(args);
-
-        write_log(nullptr, -1, message.c_str());
-    }
-    catch (...) { }
+    va_list args;
+    va_start(args, format);
+    trace_va(file_name, line_num, format, args);
+    va_end(args);
 }
 
 NativeTraceRedirect* NativeTraceRedirect::GetTraceRedirector()

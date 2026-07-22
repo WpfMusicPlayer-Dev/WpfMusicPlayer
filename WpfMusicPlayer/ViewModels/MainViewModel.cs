@@ -46,6 +46,9 @@ public partial class MainViewModel : ObservableObject, IDisposable
     private int _sampleRate;
     private readonly AudioSettings.ChannelType _channelMode;
     private readonly AudioSettings.BitDepthType _bitDepth;
+    private readonly AudioSettings.BackendType _audioBackend;
+    private readonly string _outputDeviceId;
+    private readonly int _resolvedDeviceSampleRate;
     private bool _enableAutoPlay;
     private float? _pendingSeekTime;
     private readonly GCLatencyMode _previousLatencyMode;
@@ -111,11 +114,16 @@ public partial class MainViewModel : ObservableObject, IDisposable
         _sampleRate = startupConfig.Audio.SampleRate;
         _channelMode = startupConfig.Audio.Channel;
         _bitDepth = startupConfig.Audio.BitDepth;
+        _audioBackend = startupConfig.Audio.Backend;
+        _outputDeviceId = startupConfig.Audio.OutputDeviceId ?? string.Empty;
         PendingSampleRate = _sampleRate;
         PendingChannelMode = _channelMode;
         PendingBitDepth = _bitDepth;
-        Equalizer.SetSampleRate(_sampleRate);
+        PendingAudioBackend = _audioBackend;
+        PendingOutputDeviceId = _outputDeviceId;
         _musicPlayer = CreateMusicPlayer();
+        _resolvedDeviceSampleRate = _musicPlayer.GetDeviceOutputSampleRate();
+        UpdateEqualizerSampleRate(_sampleRate);
         
         var info = Assembly
             .GetExecutingAssembly()
@@ -131,12 +139,48 @@ public partial class MainViewModel : ObservableObject, IDisposable
         SubscribeSmtcEvents();
         RestoreSettingsFromCommandLine();
         _logger.LogInformation(
-            "MainViewModel initialized, sample rate: {SampleRate}, channel mode: {ChannelMode}, bit depth: {BitDepth}",
-            _sampleRate, _channelMode, _bitDepth);
+            "MainViewModel initialized, backend: {AudioBackend}, output device: {OutputDeviceId}, sample rate: {SampleRate}, channel mode: {ChannelMode}, bit depth: {BitDepth}",
+            _audioBackend, _outputDeviceId, _sampleRate, _channelMode, _bitDepth);
     }
 
     private MusicPlayerManaged CreateMusicPlayer() =>
-        new(_sampleRate, (int)_channelMode, (int)_bitDepth);
+        new(
+            _sampleRate,
+            (int)_channelMode,
+            (int)_bitDepth,
+            (int)_audioBackend,
+            _outputDeviceId);
+
+    internal static int ResolveEqualizerSampleRate(
+        AudioSettings.BackendType backend,
+        int configuredSampleRate,
+        int resolvedDeviceSampleRate)
+    {
+#if WINDOWS
+        if (backend == AudioSettings.BackendType.WasapiExclusive &&
+            resolvedDeviceSampleRate > 0)
+        {
+            return resolvedDeviceSampleRate;
+        }
+#endif
+        return configuredSampleRate;
+    }
+
+    private void UpdateEqualizerSampleRate(int configuredSampleRate) =>
+        Equalizer.SetSampleRate(ResolveEqualizerSampleRate(
+            _audioBackend,
+            configuredSampleRate,
+            _resolvedDeviceSampleRate));
+
+    private static string FormatAudioBackend(AudioSettings.BackendType backend) =>
+        backend switch
+        {
+            AudioSettings.BackendType.FAudio => "FAudio（共享模式）",
+#if WINDOWS
+            AudioSettings.BackendType.WasapiExclusive => "WASAPI（独占模式）",
+#endif
+            _ => backend.ToString()
+        };
 
     private void OnDesktopLyricPropertyChanged(object? sender, PropertyChangedEventArgs e)
     {
@@ -400,13 +444,28 @@ public partial class MainViewModel : ObservableObject, IDisposable
     [ObservableProperty]
     public partial AudioSettings.BitDepthType PendingBitDepth { get; private set; }
 
+    [ObservableProperty]
+    public partial AudioSettings.BackendType PendingAudioBackend { get; private set; }
+
+    [ObservableProperty]
+    public partial string PendingOutputDeviceId { get; private set; } = string.Empty;
+
     public bool IsSampleRateRestartRequired => PendingSampleRate != _sampleRate;
 
     public bool IsChannelModeRestartRequired => PendingChannelMode != _channelMode;
 
     public bool IsBitDepthRestartRequired => PendingBitDepth != _bitDepth;
 
+    public bool IsAudioBackendRestartRequired => PendingAudioBackend != _audioBackend;
+
+    public bool IsOutputDeviceRestartRequired => !string.Equals(
+        PendingOutputDeviceId,
+        _outputDeviceId,
+        StringComparison.OrdinalIgnoreCase);
+
     public bool IsAudioSettingsRestartRequired =>
+        IsAudioBackendRestartRequired ||
+        IsOutputDeviceRestartRequired ||
         IsSampleRateRestartRequired ||
         IsChannelModeRestartRequired ||
         IsBitDepthRestartRequired;
@@ -416,6 +475,10 @@ public partial class MainViewModel : ObservableObject, IDisposable
         get
         {
             List<string> changes = [];
+            if (IsAudioBackendRestartRequired)
+                changes.Add($"音频后端：{FormatAudioBackend(PendingAudioBackend)}");
+            if (IsOutputDeviceRestartRequired)
+                changes.Add($"输出设备：{Settings.GetOutputDeviceDisplayName(PendingOutputDeviceId)}");
             if (IsSampleRateRestartRequired)
                 changes.Add($"采样率：{MusicPlayerManaged.FormatAudioSampleRate(PendingSampleRate)}");
             if (IsChannelModeRestartRequired)
@@ -634,10 +697,12 @@ public partial class MainViewModel : ObservableObject, IDisposable
         if (e.SettingName == SettingsViewModel.AudioOutputSettingsChangeName)
         {
             ref var config = ref _configProvider.GetConfig();
+            PendingAudioBackend = config.Audio.Backend;
+            PendingOutputDeviceId = config.Audio.OutputDeviceId ?? string.Empty;
             PendingSampleRate = config.Audio.SampleRate;
             PendingChannelMode = config.Audio.Channel;
             PendingBitDepth = config.Audio.BitDepth;
-            Equalizer.SetSampleRate(PendingSampleRate);
+            UpdateEqualizerSampleRate(PendingSampleRate);
             NotifyAudioSettingsRestartStateChanged();
             return;
         }
@@ -645,7 +710,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
         if (e.SettingName == nameof(SettingsViewModel.SelectedSampleRate))
         {
             PendingSampleRate = _configProvider.GetConfig().Audio.SampleRate;
-            Equalizer.SetSampleRate(PendingSampleRate);
+            UpdateEqualizerSampleRate(PendingSampleRate);
             NotifyAudioSettingsRestartStateChanged();
             return;
         }
@@ -661,11 +726,21 @@ public partial class MainViewModel : ObservableObject, IDisposable
         {
             PendingBitDepth = _configProvider.GetConfig().Audio.BitDepth;
             NotifyAudioSettingsRestartStateChanged();
+            return;
+        }
+
+        if (e.SettingName == nameof(SettingsViewModel.SelectedOutputDeviceId))
+        {
+            PendingOutputDeviceId =
+                _configProvider.GetConfig().Audio.OutputDeviceId ?? string.Empty;
+            NotifyAudioSettingsRestartStateChanged();
         }
     }
 
     private void NotifyAudioSettingsRestartStateChanged()
     {
+        OnPropertyChanged(nameof(IsAudioBackendRestartRequired));
+        OnPropertyChanged(nameof(IsOutputDeviceRestartRequired));
         OnPropertyChanged(nameof(IsSampleRateRestartRequired));
         OnPropertyChanged(nameof(IsChannelModeRestartRequired));
         OnPropertyChanged(nameof(IsBitDepthRestartRequired));
@@ -737,7 +812,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
             _sampleRate,
             sampleRate);
         PendingSampleRate = sampleRate;
-        Equalizer.SetSampleRate(sampleRate);
+        UpdateEqualizerSampleRate(sampleRate);
         NotifyAudioSettingsRestartStateChanged();
         return Task.CompletedTask;
     }

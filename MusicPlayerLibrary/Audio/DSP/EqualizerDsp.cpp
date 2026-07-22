@@ -98,6 +98,27 @@ namespace MusicPlayerLibrary::AudioDsp
         return config;
     }
 
+	LimiterConfig MakeSinkLimiterConfig() noexcept
+	{
+		return {
+			.enabled = true,
+			.ceiling = 1.0f,
+			.lookahead_ms = 0.0f,
+			.release_ms = 50.0f,
+			.match_input_loudness = true
+		};
+	}
+
+	bool IsValidEqualizerSnapshotHeader(
+		const EqualizerDspSnapshot& snapshot) noexcept
+	{
+		return snapshot.abi_version == EqualizerSnapshotAbiVersion &&
+			snapshot.byte_size == sizeof(EqualizerDspSnapshot) &&
+			std::isfinite(snapshot.pre_gain) &&
+			snapshot.pre_gain >= MinimumEqualizerPreGain &&
+			snapshot.pre_gain <= MaximumEqualizerPreGain;
+	}
+
     EqualizerDspSnapshot CompileEqualizerSnapshot(
         const EqualizerConfig& config,
         std::uint32_t sampleRate,
@@ -108,7 +129,8 @@ namespace MusicPlayerLibrary::AudioDsp
         snapshot.byte_size = sizeof(EqualizerDspSnapshot);
         snapshot.reset_generation = resetGeneration;
         snapshot.pre_gain = std::isfinite(preGain)
-            ? std::clamp(preGain, 0.0f, 4.0f)
+            ? std::clamp(
+				preGain, MinimumEqualizerPreGain, MaximumEqualizerPreGain)
             : 1.0f;
 
         for (std::size_t index = 0; index < EqualizerBandCount; ++index)
@@ -200,6 +222,14 @@ namespace MusicPlayerLibrary::AudioDsp
         applied_reset_generation_ = ~std::uint64_t{0};
     }
 
+	void EqualizerDsp::UpdateLoudnessMatchGain(
+		const float target_gain) noexcept
+	{
+		loudness_match_gain_ =
+			loudness_gain_history_ * loudness_match_gain_ +
+			(1.0f - loudness_gain_history_) * target_gain;
+	}
+
     bool EqualizerDsp::Process(
         const EqualizerDspSnapshot& snapshot,
         const float* input,
@@ -211,10 +241,7 @@ namespace MusicPlayerLibrary::AudioDsp
             frameCount > max_frame_count_ ||
             (frameCount != 0 &&
              (output == nullptr || (!inputSilent && input == nullptr))) ||
-            snapshot.abi_version != EqualizerSnapshotAbiVersion ||
-            snapshot.byte_size != sizeof(EqualizerDspSnapshot) ||
-            !std::isfinite(snapshot.pre_gain) ||
-            snapshot.pre_gain < 0.0f || snapshot.pre_gain > 4.0f)
+			!IsValidEqualizerSnapshotHeader(snapshot))
         {
             return false;
         }
@@ -294,9 +321,7 @@ namespace MusicPlayerLibrary::AudioDsp
                             equalized_loudness_power_),
                         MinimumLoudnessMatchGain,
                         MaximumLoudnessMatchGain);
-                    loudness_match_gain_ =
-                        loudness_gain_history_ * loudness_match_gain_ +
-                        (1.0f - loudness_gain_history_) * targetGain;
+					UpdateLoudnessMatchGain(targetGain);
                 }
             }
             else if (!limiter_.match_input_loudness)
@@ -454,9 +479,7 @@ namespace MusicPlayerLibrary::AudioDsp
 							loudness_match_gain_ * correction,
 							MinimumLoudnessMatchGain,
 							MaximumLoudnessMatchGain);
-						loudness_match_gain_ =
-							loudness_gain_history_ * loudness_match_gain_ +
-							(1.0f - loudness_gain_history_) * targetGain;
+						UpdateLoudnessMatchGain(targetGain);
 					}
 				}
 			}

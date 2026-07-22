@@ -8,6 +8,23 @@
 
 namespace MusicPlayerLibrary
 {
+	public ref class AudioOutputDeviceInfoManaged sealed
+	{
+	public:
+		AudioOutputDeviceInfoManaged(
+			System::String^ id,
+			System::String^ display_name,
+			bool is_default)
+		{
+			Id = id;
+			DisplayName = display_name;
+			IsDefault = is_default;
+		}
+
+		property System::String^ Id;
+		property System::String^ DisplayName;
+		property bool IsDefault;
+	};
     
 	public delegate void PlayerFileInitDelegate();
 	public delegate void PlayerAlbumArtInitDelegate(array<System::Byte>^ encodedImage);
@@ -39,6 +56,12 @@ namespace MusicPlayerLibrary
 		MusicPlayerManaged();
 		MusicPlayerManaged(int sample_rate);
 		MusicPlayerManaged(int sample_rate, int channel_mode, int bit_depth);
+		MusicPlayerManaged(
+			int sample_rate,
+			int channel_mode,
+			int bit_depth,
+			int backend,
+			System::String^ output_device_id);
 
 	private:
 		void check_if_null();
@@ -79,11 +102,14 @@ namespace MusicPlayerLibrary
 		System::String^ GetSongArtist();
 		System::String^ GetAudioSourceFormat();
 		System::String^ GetDeviceOutputFormat();
+		int GetDeviceOutputSampleRate();
 		System::String^ GetSharedDeviceOutputFormat();
 		static void GetSystemDefaultOutputFormat(
 			[System::Runtime::InteropServices::OutAttribute] int% channel_type_id,
 			[System::Runtime::InteropServices::OutAttribute] int% sample_rate,
 			[System::Runtime::InteropServices::OutAttribute] int% bit_depth);
+		static array<AudioOutputDeviceInfoManaged^>^ GetAudioOutputDevices(
+			int backend);
 		static System::String^ FormatAudioChannelType(int channel_type_id);
 		static System::String^ FormatAudioSampleRate(int sample_rate);
 		static System::String^ FormatAudioBitDepth(int bit_depth);

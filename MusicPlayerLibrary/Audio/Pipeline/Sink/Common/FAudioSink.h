@@ -14,14 +14,18 @@
 #include <vector>
 
 #include <FAudio.h>
-#include <FAPO.h>
-
+#include "Audio/FAudioResource.h"
 #include "Audio/Pipeline/AudioPipeline.h"
-#include "Audio/DSP/EqualizerDsp.h"
-#include "Audio/Pipeline/Device/FAudioOutputDevice.h"
+#include "Audio/DSP/EqualizerSettings.h"
+#include "Audio/Pipeline/Device/Common/FAudioOutputDevice.h"
+#include "Audio/Pipeline/Sink/Common/FapoEqualizer.h"
 
 namespace MusicPlayerLibrary
 {
+	/**
+	 * @brief FAudio sink, default audio sink implementation.
+	 * Cross-platform, shared-mode only.
+	 */
 	class FAudioSink final : public IAudioSink
 	{
 		static constexpr std::size_t BufferPoolSize = 64;
@@ -61,8 +65,8 @@ namespace MusicPlayerLibrary
 
 		std::shared_ptr<FAudioOutputDevice> device_;
 		AudioOutputFormat output_format_{};
-		FAudioSourceVoice* source_voice_ = nullptr;
-		FAPO* equalizer_effect_ = nullptr;
+		UniqueFAudioVoice source_voice_;
+		AudioDsp::UniqueFapo equalizer_effect_;
 		VoiceCallbackContext voice_callback_{};
 
 		mutable std::mutex submit_mutex_;
@@ -80,9 +84,7 @@ namespace MusicPlayerLibrary
 		std::uint64_t completed_tail_probe_process_sequence_ = 0;
 
 		mutable std::mutex effect_mutex_;
-		AudioDsp::EqualizerConfig equalizer_config_ =
-			AudioDsp::MakeDefaultTenBandConfig();
-		std::uint64_t equalizer_reset_generation_ = 0;
+		AudioDsp::EqualizerSettings equalizer_settings_;
 
 		std::atomic<AudioStreamGeneration> generation_{0};
 		std::atomic<AudioStreamGeneration> engine_completed_generation_{0};
@@ -111,8 +113,6 @@ namespace MusicPlayerLibrary
 		mutable std::condition_variable stream_end_cv_;
 		std::jthread tail_drain_worker_;
 
-		[[nodiscard]] AudioDsp::EqualizerDspSnapshot
-			BuildEqualizerSnapshotLocked() const noexcept;
 		bool PublishEqualizerSnapshotLocked() noexcept;
 		void CreateSourceVoice();
 		void DestroySourceVoice() noexcept;
@@ -128,15 +128,24 @@ namespace MusicPlayerLibrary
 			bool media_frames);
 		bool BeginTailDrainLocked(AudioStreamGeneration generation);
 		void TailDrainWorker(std::stop_token stop_token) noexcept;
+		void UnaccountBufferFramesLocked(BufferSlot* slot) noexcept;
 		void ReleaseBufferLocked(BufferSlot* slot) noexcept;
 		void RecycleBuffer(
 			BufferSlot* slot,
 			bool defer_eos_until_stream_end = false) noexcept;
 		bool AbortStreamLocked() noexcept;
+		void ResetStreamProgressState() noexcept;
 		void HandleStreamEnd() noexcept;
 		void HandleVoiceError(
 			std::uint32_t error,
 			AudioStreamGeneration callback_generation) noexcept;
+		struct VoiceProgressSnapshot
+		{
+			std::uint32_t buffers_queued = 0;
+			std::uint64_t submitted_media_frames = 0;
+			std::uint64_t mixed_media_frames = 0;
+		};
+		[[nodiscard]] VoiceProgressSnapshot QueryVoiceProgress() const noexcept;
 		void RecordPlaybackClockPoint(
 			AudioStreamGeneration generation,
 			std::int64_t captured_at_nanoseconds,
@@ -187,5 +196,7 @@ namespace MusicPlayerLibrary
 		{
 			return device_;
 		}
+
+		bool IsExclusiveModeEnabled() noexcept override;
 	};
 }

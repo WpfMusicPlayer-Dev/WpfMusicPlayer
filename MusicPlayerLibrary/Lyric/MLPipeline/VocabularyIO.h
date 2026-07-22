@@ -1,10 +1,14 @@
 ﻿#pragma once
+#include <cstddef>
 #include <cstdint>
 #include <string>
 #include <unordered_map>
 
 namespace MusicPlayerLibrary::MLPipeline
 {
+    inline constexpr std::size_t minimum_token_size = 1;
+    inline constexpr std::size_t maximum_token_size = 3;
+
     using Vocabulary = std::unordered_map<std::string, int>;
 
     // The on-disk format is independent of dlib:

@@ -104,7 +104,7 @@
             <LanguageStandard>stdcpp20</LanguageStandard>
         </ClCompile>
         <Link>
-            <AdditionalDependencies>avrt.lib;shlwapi.lib;runtimeobject.lib;windowsapp.lib;%(AdditionalDependencies)</AdditionalDependencies>
+            <AdditionalDependencies>avrt.lib;ole32.lib;uuid.lib;shlwapi.lib;runtimeobject.lib;windowsapp.lib;%(AdditionalDependencies)</AdditionalDependencies>
         </Link>
     </ItemDefinitionGroup>
     <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|ARM64'">
@@ -119,7 +119,7 @@
             <LanguageStandard>stdcpp20</LanguageStandard>
         </ClCompile>
         <Link>
-            <AdditionalDependencies>avrt.lib;shlwapi.lib;runtimeobject.lib;windowsapp.lib;%(AdditionalDependencies)</AdditionalDependencies>
+            <AdditionalDependencies>avrt.lib;ole32.lib;uuid.lib;shlwapi.lib;runtimeobject.lib;windowsapp.lib;%(AdditionalDependencies)</AdditionalDependencies>
         </Link>
     </ItemDefinitionGroup>
     <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
@@ -134,7 +134,7 @@
             <LanguageStandard>stdcpp20</LanguageStandard>
         </ClCompile>
         <Link>
-            <AdditionalDependencies>avrt.lib;shlwapi.lib;runtimeobject.lib;windowsapp.lib;%(AdditionalDependencies)</AdditionalDependencies>
+            <AdditionalDependencies>avrt.lib;ole32.lib;uuid.lib;shlwapi.lib;runtimeobject.lib;windowsapp.lib;%(AdditionalDependencies)</AdditionalDependencies>
         </Link>
     </ItemDefinitionGroup>
     <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|ARM64'">
@@ -149,30 +149,52 @@
             <LanguageStandard>stdcpp20</LanguageStandard>
         </ClCompile>
         <Link>
-            <AdditionalDependencies>avrt.lib;shlwapi.lib;runtimeobject.lib;windowsapp.lib;%(AdditionalDependencies)</AdditionalDependencies>
+            <AdditionalDependencies>avrt.lib;ole32.lib;uuid.lib;shlwapi.lib;runtimeobject.lib;windowsapp.lib;%(AdditionalDependencies)</AdditionalDependencies>
         </Link>
     </ItemDefinitionGroup>
     <ItemGroup>
+		<ClInclude Include="Audio\AudioOutputCapabilities.h" />
 		<ClInclude Include="Audio\AudioOutputFormat.h" />
+		<ClInclude Include="Audio\FAudioResource.h" />
         <ClInclude Include="Audio\DSP\EqualizerDsp.h"/>
-        <ClInclude Include="Audio\DSP\FapoEqualizer.h"/>
+        <ClInclude Include="Audio\DSP\EqualizerSettings.h" />
+        <ClInclude Include="Audio\DSP\PcmSampleConversion.h" />
+        <ClInclude Include="Audio\FFmpeg\FFmpegError.h" />
+        <ClInclude Include="Audio\FFmpeg\FFmpegResource.h" />
         <ClInclude Include="Audio\FFT\AudioPipelinePerformanceHelper.h" />
+        <ClInclude Include="Audio\FFT\KissFftConfig.h" />
         <ClInclude Include="Audio\FFT\FFTExecuter.h"/>
         <ClInclude Include="Audio\MusicPlayerLibrary.h"/>
         <ClInclude Include="Audio\MusicPlayerMessage.h" />
         <ClInclude Include="Audio\Pipeline\AudioPipeline.h" />
-        <ClInclude Include="Audio\Pipeline\Device\FAudioOutputDevice.h" />
+        <ClInclude Include="Audio\Pipeline\Device\AudioOutputDeviceLifecycle.h" />
+        <ClInclude Include="Audio\Pipeline\Device\Common\FAudioOutputDevice.h" />
+        <ClInclude Include="Audio\Pipeline\Device\Common\SharedAudioDeviceCache.h" />
+        <ClInclude Include="Audio\Pipeline\Device\Windows\WasapiExclusiveOutputDevice.h" Condition="'$(OS)' == 'Windows_NT'" />
         <ClInclude Include="Audio\Pipeline\Observer\FFTAudioObserve.h" />
-        <ClInclude Include="Audio\Pipeline\Sink\FAudioSink.h" />
+        <ClInclude Include="Audio\Pipeline\Sink\AudioSinkFactory.h" />
+        <ClInclude Include="Audio\Pipeline\Sink\Common\FapoEqualizer.h" />
+        <ClInclude Include="Audio\Pipeline\Sink\Common\FAudioSink.h" />
+        <ClInclude Include="Audio\Pipeline\Sink\Windows\WasapiExclusiveSink.h" Condition="'$(OS)' == 'Windows_NT'" />
         <ClInclude Include="Audio\Pipeline\Source\AudioFile.h" />
+        <ClInclude Include="Audio\Pipeline\Windows\WasapiAudioHelpers.h" Condition="'$(OS)' == 'Windows_NT'" />
+        <ClInclude Include="Core\BinaryData.h" />
         <ClInclude Include="Core\FileAbstractionLayer.h" />
+        <ClInclude Include="Core\FileIO.h" />
+        <ClInclude Include="Core\FileSeek.h" />
         <ClInclude Include="Core\LocaleConverter.h" />
         <ClInclude Include="Core\NativeLibraryRuntime.h" />
         <ClInclude Include="Core\NativeLogWriter.h" />
         <ClInclude Include="Core\NativeTraceRedirect.h" />
+        <ClInclude Include="Core\ChronoUtilities.h" />
+        <ClInclude Include="Core\NumericConversion.h" />
         <ClInclude Include="Core\AudioThreadScheduleHelper.h" />
+        <ClInclude Include="Core\StringUtilities.h" />
+		<ClInclude Include="Core\Utf16Conversion.h" />
         <ClInclude Include="Crypto\NcmDecryptor.h" />
+        <ClInclude Include="Crypto\NcmFormat.h" />
         <ClInclude Include="Lyric\LrcFileController.h" />
+        <ClInclude Include="Lyric\LrcTextParser.h" />
         <ClInclude Include="Lyric\MLPipeline\MLPipelineCommon.h" />
         <ClInclude Include="Lyric\MLPipeline\NCNNPipeline.h" />
         <ClInclude Include="Lyric\MLPipeline\VocabularyIO.h" />
@@ -186,25 +208,35 @@
         <ClInclude Include="Managed\SmtcInteropHelper.h" />
         <ClInclude Include="pch.h" />
         <ClInclude Include="Platform\Common\VectorMemoryFile.h" />
+        <ClInclude Include="Platform\Windows\ComPtr.h" />
         <ClInclude Include="Platform\Windows\MMCSSHelper.h" />
         <ClInclude Include="Platform\Windows\MMCSSHelperFactory.h" />
         <ClInclude Include="Platform\Windows\WindowsApiDiskFile.h" />
         <ClInclude Include="Platform\Windows\WindowsCommon.h" />
         <ClInclude Include="Platform\Windows\WindowsFileSystem.h" />
+        <ClInclude Include="Platform\Windows\WindowsResource.h" />
         <ClInclude Include="Resource.h" />
     </ItemGroup>
     <ItemGroup>
+        <ClCompile Include="Audio\DSP\EqualizerSettings.cpp" />
+        <ClCompile Include="Audio\DSP\PcmSampleConversion.cpp" />
+        <ClCompile Include="Audio\FFmpeg\FFmpegError.cpp" />
         <ClCompile Include="Audio\FFT\AudioPipelinePerformanceHelper.cpp" />
-        <ClCompile Include="Audio\Pipeline\Device\FAudioOutputDevice.cpp" />
+        <ClCompile Include="Audio\Pipeline\Device\AudioOutputDeviceLifecycle.cpp" />
+        <ClCompile Include="Audio\Pipeline\Device\Common\FAudioOutputDevice.cpp" />
+        <ClCompile Include="Audio\Pipeline\Device\Windows\WasapiExclusiveOutputDevice.cpp" Condition="'$(OS)' == 'Windows_NT'" />
         <ClCompile Include="Audio\Pipeline\Observer\FFTAudioObserve.cpp" />
-        <ClCompile Include="Audio\Pipeline\Sink\FAudioSink.cpp" />
+        <ClCompile Include="Audio\Pipeline\Sink\AudioSinkFactory.cpp" />
+        <ClCompile Include="Audio\Pipeline\Sink\Common\FapoEqualizer.cpp" />
+        <ClCompile Include="Audio\Pipeline\Sink\Common\FAudioSink.cpp" />
+        <ClCompile Include="Audio\Pipeline\Sink\Windows\WasapiExclusiveSink.cpp" Condition="'$(OS)' == 'Windows_NT'" />
         <ClCompile Include="Audio\Pipeline\Source\AudioFile.cpp" />
+        <ClCompile Include="Lyric\LrcTextParser.cpp" />
         <ClCompile Include="Lyric\MLPipeline\MLPipelineCommon.cpp" />
         <ClCompile Include="Lyric\MLPipeline\NCNNPipeline.cpp" />
         <ClCompile Include="Lyric\MLPipeline\VocabularyIO.cpp" />
         <ClCompile Include="Managed\AssemblyInfo.cpp" />
         <ClCompile Include="Audio\DSP\EqualizerDsp.cpp" />
-        <ClCompile Include="Audio\DSP\FapoEqualizer.cpp" />
 		<ClCompile Include="Audio\AudioOutputFormat.cpp" />
         <ClCompile Include="Audio\FFT\FFTExecuter.cpp" />
         <ClCompile Include="Core\AudioThreadScheduleHelper.cpp" />

@@ -10,12 +10,9 @@
 #include <thread>
 #include <vector>
 
-#define kiss_fft_scalar double
-#include <kissfft/kiss_fft.h>
-
 #include "Audio/AudioOutputFormat.h"
-
-struct SwrContext;
+#include "Audio/FFmpeg/FFmpegResource.h"
+#include "Audio/FFT/KissFftConfig.h"
 
 namespace MusicPlayerLibrary
 {
@@ -28,17 +25,19 @@ namespace MusicPlayerLibrary
 	// 当你觉得自己没用的时候，你可以想想某个瞎改了一晚上把频谱图改成馒头然后回滚的我
 	class FFTExecuter
 	{
-		static constexpr int FFT_SAMPLE_RATE = 48000;
-		static constexpr size_t BYTES_PER_FRAME = 4; // S16 * Stereo
-		static constexpr size_t FFT_SIZE = 2048;     // fixed fft size
-		static constexpr size_t RING_BUFFER_MAX_SIZE = FFT_SIZE * BYTES_PER_FRAME;
-		static constexpr int FFT_FRAME_INTERVAL_MS = 16;
-		static constexpr size_t FFT_HOP_SIZE =
-			FFT_SAMPLE_RATE * FFT_FRAME_INTERVAL_MS / 1000;
-		static constexpr size_t MAX_SPECTRUM_QUEUE_SIZE = 128;
-		static constexpr size_t RING_BUFFER_CAPACITY =
-			(FFT_SIZE + FFT_HOP_SIZE * MAX_SPECTRUM_QUEUE_SIZE) *
-			BYTES_PER_FRAME;
+	protected:
+		static constexpr size_t BytesPerFrame = 4; // S16 * Stereo
+		static constexpr size_t FftSize = 2'048;
+		static constexpr size_t RingBufferWindowBytes =
+			FftSize * BytesPerFrame;
+		static constexpr int FftFrameIntervalMilliseconds = 16;
+		static constexpr size_t FftHopFrames =
+			StandardAudioSampleRate * FftFrameIntervalMilliseconds / 1'000;
+		static constexpr size_t MaximumSpectrumQueueSize = 128;
+		static constexpr size_t RingBufferCapacityBytes =
+			(FftSize + FftHopFrames * MaximumSpectrumQueueSize) *
+			BytesPerFrame;
+
 	public:
 		void AddSamplesToRingBuffer(
 			const uint8_t* interleaved_samples,
@@ -71,11 +70,11 @@ namespace MusicPlayerLibrary
 		~FFTExecuter();
 
 	protected:
+		void ClearSpectrumOutput();
+
 		// ring buffer
 		std::deque<uint8_t> spectrum_data_ring_buffer;
 		std::vector<float> spectrum_data;
-		std::vector<float> spectrum_max_data{};
-		std::vector<float> spectrum_smooth_data{};
 		mutable std::mutex ring_buffer_mutex;
 		mutable std::mutex spectrum_data_mutex;
 		std::condition_variable ring_buffer_cv;
@@ -98,15 +97,13 @@ namespace MusicPlayerLibrary
 		int input_sample_rate = 0;
 
 		// avoid duplicate allocation
-		kiss_fft_cfg fft_cfg = nullptr;
-		static constexpr size_t fft_size = FFT_SIZE;
-		static constexpr int sample_rate = FFT_SAMPLE_RATE;
+		UniqueKissFftConfig fft_cfg;
 		std::vector<kiss_fft_cpx> fft_in;
 		std::vector<kiss_fft_cpx> fft_out;
 
 		
-		// fixed FFT format: 48000/S16/Stereo
-		SwrContext* resample_context = nullptr;
+		// fixed FFT format: StandardAudioSampleRate/S16/Stereo
+		UniqueSwrContext resample_context;
 		mutable std::mutex resample_mutex;
 	};
 

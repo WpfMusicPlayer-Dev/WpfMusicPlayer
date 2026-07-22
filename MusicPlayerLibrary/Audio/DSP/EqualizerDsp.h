@@ -16,6 +16,10 @@ namespace MusicPlayerLibrary::AudioDsp
             1000.0f, 2000.0f, 4000.0f, 8000.0f, 16000.0f
         };
     inline constexpr std::uint32_t EqualizerSnapshotAbiVersion = 2;
+	inline constexpr int MinimumEqualizerBandGainDb = -24;
+	inline constexpr int MaximumEqualizerBandGainDb = 24;
+	inline constexpr float MinimumEqualizerPreGain = 0.0f;
+	inline constexpr float MaximumEqualizerPreGain = 4.0f;
 
     enum class BiquadType : std::uint32_t { Peaking = 0 };
     struct EqualizerBandConfig
@@ -60,6 +64,9 @@ namespace MusicPlayerLibrary::AudioDsp
     static_assert(std::is_trivially_copyable_v<EqualizerDspSnapshot>);
 
     EqualizerConfig MakeDefaultTenBandConfig() noexcept;
+	[[nodiscard]] LimiterConfig MakeSinkLimiterConfig() noexcept;
+	[[nodiscard]] bool IsValidEqualizerSnapshotHeader(
+		const EqualizerDspSnapshot& snapshot) noexcept;
     EqualizerDspSnapshot CompileEqualizerSnapshot(
         const EqualizerConfig&,
         std::uint32_t,
@@ -77,6 +84,8 @@ namespace MusicPlayerLibrary::AudioDsp
         [[nodiscard]] bool HasTail() const noexcept;
         [[nodiscard]] std::uint32_t GetLimiterDelayFrames() const noexcept;
     private:
+		void UpdateLoudnessMatchGain(float target_gain) noexcept;
+
         struct BiquadState { float z1 = 0.0f, z2 = 0.0f; };
         struct PeakNode
         {

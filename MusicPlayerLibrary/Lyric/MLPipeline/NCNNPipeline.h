@@ -9,22 +9,13 @@
 
 namespace MusicPlayerLibrary::MLPipeline
 {
-    struct DenseLayer
-    {
-        std::size_t input_size{};
-        std::size_t output_size{};
-        std::vector<float> weights;
-        std::vector<float> biases;
-    };
+    inline constexpr std::string_view NcnnInputBlobName = "in0";
 
     struct NcnnModelFiles
     {
         std::wstring param;
         std::wstring weights;
     };
-
-    // A non-cryptographic fingerprint used to reject accidentally mixed model files.
-    std::uint64_t fingerprint_ncnn_model(const NcnnModelFiles& files);
 
     class NcnnClassifier
     {
@@ -39,10 +30,11 @@ namespace MusicPlayerLibrary::MLPipeline
 
         std::size_t input_size() const noexcept;
         std::uint64_t model_fingerprint() const noexcept;
-        std::vector<float> run(std::span<const float> features) const;
         int predict(std::span<const float> features) const;
 
     private:
+        std::vector<float> run(std::span<const float> features) const;
+
         class Impl;
         std::unique_ptr<Impl> impl_;
     };

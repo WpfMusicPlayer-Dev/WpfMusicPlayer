@@ -38,5 +38,6 @@ public sealed class AudioFormatApiTest
         Assert.AreEqual(
             "192 kHz / 24-bit / Surround 5.1",
             player.GetDeviceOutputFormat());
+        Assert.AreEqual(192_000, player.GetDeviceOutputSampleRate());
     }
 }

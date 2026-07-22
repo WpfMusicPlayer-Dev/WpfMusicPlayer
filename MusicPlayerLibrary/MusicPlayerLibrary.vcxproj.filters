@@ -1,21 +1,6 @@
-﻿<?xml version="1.0" encoding="utf-8"?>
+<?xml version="1.0" encoding="utf-8"?>
 <Project ToolsVersion="4.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
   <ItemGroup>
-    <ClInclude Include="Audio\Pipeline\AudioPipeline.h">
-      <Filter>头文件</Filter>
-    </ClInclude>
-    <ClInclude Include="Audio\Pipeline\Device\FAudioOutputDevice.h">
-      <Filter>头文件</Filter>
-    </ClInclude>
-    <ClInclude Include="Audio\Pipeline\Sink\FAudioSink.h">
-      <Filter>头文件</Filter>
-    </ClInclude>
-    <ClInclude Include="Audio\Pipeline\Observer\FFTAudioObserve.h">
-      <Filter>头文件</Filter>
-    </ClInclude>
-    <ClInclude Include="Audio\Pipeline\Source\AudioFile.h">
-      <Filter>头文件</Filter>
-    </ClInclude>
     <Filter Include="源文件">
       <UniqueIdentifier>{4FC737F1-C7A5-4376-A066-2A32D752A2FF}</UniqueIdentifier>
       <Extensions>cpp;c;cc;cxx;c++;cppm;ixx;def;odl;idl;hpj;bat;asm;asmx</Extensions>
@@ -30,80 +15,118 @@
     </Filter>
   </ItemGroup>
   <ItemGroup>
-    <ClCompile Include="Audio\Pipeline\Device\FAudioOutputDevice.cpp">
-      <Filter>源文件</Filter>
-    </ClCompile>
-    <ClCompile Include="Audio\Pipeline\Sink\FAudioSink.cpp">
-      <Filter>源文件</Filter>
-    </ClCompile>
-    <ClCompile Include="Audio\Pipeline\Observer\FFTAudioObserve.cpp">
-      <Filter>源文件</Filter>
-    </ClCompile>
-    <ClInclude Include="MusicPlayerLibrary.h">
-      <Filter>头文件</Filter>
-    </ClInclude>
-    <ClInclude Include="Resource.h">
-      <Filter>头文件</Filter>
-    </ClInclude>
-    <ClInclude Include="pch.h">
-      <Filter>头文件</Filter>
-    </ClInclude>
-    <ClInclude Include="AtlTraceRedirect.h">
-      <Filter>头文件</Filter>
-    </ClInclude>
-    <ClInclude Include="LrcFileController.h">
-      <Filter>头文件</Filter>
-    </ClInclude>
-    <ClInclude Include="FFTExecuter.h">
-      <Filter>头文件</Filter>
-    </ClInclude>
-    <ClInclude Include="LocaleConverter.h">
-      <Filter>头文件</Filter>
-    </ClInclude>
-    <ClInclude Include="FileAbstractionLayer.h">
-      <Filter>头文件</Filter>
-    </ClInclude>
-    <ClInclude Include="StringUtils.h">
-      <Filter>头文件</Filter>
-    </ClInclude>
+    <ClInclude Include="Audio\AudioOutputCapabilities.h"><Filter>头文件</Filter></ClInclude>
+    <ClInclude Include="Audio\AudioOutputFormat.h"><Filter>头文件</Filter></ClInclude>
+    <ClInclude Include="Audio\FAudioResource.h"><Filter>头文件</Filter></ClInclude>
+    <ClInclude Include="Audio\DSP\EqualizerDsp.h"><Filter>头文件</Filter></ClInclude>
+    <ClInclude Include="Audio\DSP\EqualizerSettings.h"><Filter>头文件</Filter></ClInclude>
+    <ClInclude Include="Audio\DSP\PcmSampleConversion.h"><Filter>头文件</Filter></ClInclude>
+    <ClInclude Include="Audio\FFmpeg\FFmpegError.h"><Filter>头文件</Filter></ClInclude>
+    <ClInclude Include="Audio\FFmpeg\FFmpegResource.h"><Filter>头文件</Filter></ClInclude>
+    <ClInclude Include="Audio\FFT\AudioPipelinePerformanceHelper.h"><Filter>头文件</Filter></ClInclude>
+    <ClInclude Include="Audio\FFT\KissFftConfig.h"><Filter>头文件</Filter></ClInclude>
+    <ClInclude Include="Audio\FFT\FFTExecuter.h"><Filter>头文件</Filter></ClInclude>
+    <ClInclude Include="Audio\MusicPlayerLibrary.h"><Filter>头文件</Filter></ClInclude>
+    <ClInclude Include="Audio\MusicPlayerMessage.h"><Filter>头文件</Filter></ClInclude>
+    <ClInclude Include="Audio\Pipeline\AudioPipeline.h"><Filter>头文件</Filter></ClInclude>
+    <ClInclude Include="Audio\Pipeline\Device\AudioOutputDeviceLifecycle.h"><Filter>头文件</Filter></ClInclude>
+    <ClInclude Include="Audio\Pipeline\Device\Common\FAudioOutputDevice.h"><Filter>头文件</Filter></ClInclude>
+    <ClInclude Include="Audio\Pipeline\Device\Common\SharedAudioDeviceCache.h"><Filter>头文件</Filter></ClInclude>
+    <ClInclude Include="Audio\Pipeline\Device\Windows\WasapiExclusiveOutputDevice.h"><Filter>头文件</Filter></ClInclude>
+    <ClInclude Include="Audio\Pipeline\Observer\FFTAudioObserve.h"><Filter>头文件</Filter></ClInclude>
+    <ClInclude Include="Audio\Pipeline\Sink\AudioSinkFactory.h"><Filter>头文件</Filter></ClInclude>
+    <ClInclude Include="Audio\Pipeline\Sink\Common\FapoEqualizer.h"><Filter>头文件</Filter></ClInclude>
+    <ClInclude Include="Audio\Pipeline\Sink\Common\FAudioSink.h"><Filter>头文件</Filter></ClInclude>
+    <ClInclude Include="Audio\Pipeline\Sink\Windows\WasapiExclusiveSink.h"><Filter>头文件</Filter></ClInclude>
+    <ClInclude Include="Audio\Pipeline\Source\AudioFile.h"><Filter>头文件</Filter></ClInclude>
+    <ClInclude Include="Audio\Pipeline\Windows\WasapiAudioHelpers.h"><Filter>头文件</Filter></ClInclude>
+    <ClInclude Include="Core\AudioThreadScheduleHelper.h"><Filter>头文件</Filter></ClInclude>
+    <ClInclude Include="Core\BinaryData.h"><Filter>头文件</Filter></ClInclude>
+    <ClInclude Include="Core\FileAbstractionLayer.h"><Filter>头文件</Filter></ClInclude>
+    <ClInclude Include="Core\FileIO.h"><Filter>头文件</Filter></ClInclude>
+    <ClInclude Include="Core\FileSeek.h"><Filter>头文件</Filter></ClInclude>
+    <ClInclude Include="Core\LocaleConverter.h"><Filter>头文件</Filter></ClInclude>
+    <ClInclude Include="Core\NativeLibraryRuntime.h"><Filter>头文件</Filter></ClInclude>
+    <ClInclude Include="Core\NativeLogWriter.h"><Filter>头文件</Filter></ClInclude>
+    <ClInclude Include="Core\NativeTraceRedirect.h"><Filter>头文件</Filter></ClInclude>
+    <ClInclude Include="Core\ChronoUtilities.h"><Filter>头文件</Filter></ClInclude>
+    <ClInclude Include="Core\NumericConversion.h"><Filter>头文件</Filter></ClInclude>
+    <ClInclude Include="Core\StringUtilities.h"><Filter>头文件</Filter></ClInclude>
+	<ClInclude Include="Core\Utf16Conversion.h"><Filter>头文件</Filter></ClInclude>
+    <ClInclude Include="Crypto\NcmDecryptor.h"><Filter>头文件</Filter></ClInclude>
+    <ClInclude Include="Crypto\NcmFormat.h"><Filter>头文件</Filter></ClInclude>
+    <ClInclude Include="Lyric\LrcFileController.h"><Filter>头文件</Filter></ClInclude>
+    <ClInclude Include="Lyric\LrcTextParser.h"><Filter>头文件</Filter></ClInclude>
+    <ClInclude Include="Lyric\MLPipeline\MLPipelineCommon.h"><Filter>头文件</Filter></ClInclude>
+    <ClInclude Include="Lyric\MLPipeline\NCNNPipeline.h"><Filter>头文件</Filter></ClInclude>
+    <ClInclude Include="Lyric\MLPipeline\VocabularyIO.h"><Filter>头文件</Filter></ClInclude>
+    <ClInclude Include="Managed\LocaleConverterManaged.h"><Filter>头文件</Filter></ClInclude>
+    <ClInclude Include="Managed\LrcFileControllerManaged.h"><Filter>头文件</Filter></ClInclude>
+    <ClInclude Include="Managed\ManagedLoggerFactory.h"><Filter>头文件</Filter></ClInclude>
+    <ClInclude Include="Managed\ManagedLogWriter.h"><Filter>头文件</Filter></ClInclude>
+    <ClInclude Include="Managed\MusicPlayerEventBridge.h"><Filter>头文件</Filter></ClInclude>
+    <ClInclude Include="Managed\MusicPlayerLibraryRuntime.h"><Filter>头文件</Filter></ClInclude>
+    <ClInclude Include="Managed\MusicPlayerManaged.h"><Filter>头文件</Filter></ClInclude>
+    <ClInclude Include="Managed\SmtcInteropHelper.h"><Filter>头文件</Filter></ClInclude>
+    <ClInclude Include="pch.h"><Filter>头文件</Filter></ClInclude>
+    <ClInclude Include="Platform\Common\VectorMemoryFile.h"><Filter>头文件</Filter></ClInclude>
+    <ClInclude Include="Platform\Windows\ComPtr.h"><Filter>头文件</Filter></ClInclude>
+    <ClInclude Include="Platform\Windows\MMCSSHelper.h"><Filter>头文件</Filter></ClInclude>
+    <ClInclude Include="Platform\Windows\MMCSSHelperFactory.h"><Filter>头文件</Filter></ClInclude>
+    <ClInclude Include="Platform\Windows\WindowsApiDiskFile.h"><Filter>头文件</Filter></ClInclude>
+    <ClInclude Include="Platform\Windows\WindowsCommon.h"><Filter>头文件</Filter></ClInclude>
+    <ClInclude Include="Platform\Windows\WindowsFileSystem.h"><Filter>头文件</Filter></ClInclude>
+    <ClInclude Include="Platform\Windows\WindowsResource.h"><Filter>头文件</Filter></ClInclude>
+    <ClInclude Include="Resource.h"><Filter>头文件</Filter></ClInclude>
   </ItemGroup>
   <ItemGroup>
-    <ClCompile Include="Audio\Pipeline\Source\AudioFile.cpp">
-      <Filter>源文件</Filter>
-    </ClCompile>
-    <ClCompile Include="AssemblyInfo.cpp">
-      <Filter>源文件</Filter>
-    </ClCompile>
-    <ClCompile Include="pch.cpp">
-      <Filter>源文件</Filter>
-    </ClCompile>
-    <ClCompile Include="NcmDecryptor.cpp">
-      <Filter>源文件</Filter>
-    </ClCompile>
-    <ClCompile Include="AtlTraceRedirect.cpp">
-      <Filter>源文件</Filter>
-    </ClCompile>
-    <ClCompile Include="LrcFileController.cpp">
-      <Filter>源文件</Filter>
-    </ClCompile>
-    <ClCompile Include="FFTExecuter.cpp">
-      <Filter>源文件</Filter>
-    </ClCompile>
-    <ClCompile Include="LocaleConverter.cpp">
-      <Filter>源文件</Filter>
-    </ClCompile>
-    <ClCompile Include="FileAbstractionLayer.cpp">
-      <Filter>源文件</Filter>
-    </ClCompile>
+    <ClCompile Include="Audio\AudioOutputFormat.cpp"><Filter>源文件</Filter></ClCompile>
+    <ClCompile Include="Audio\DSP\EqualizerDsp.cpp"><Filter>源文件</Filter></ClCompile>
+    <ClCompile Include="Audio\DSP\EqualizerSettings.cpp"><Filter>源文件</Filter></ClCompile>
+    <ClCompile Include="Audio\DSP\PcmSampleConversion.cpp"><Filter>源文件</Filter></ClCompile>
+    <ClCompile Include="Audio\FFmpeg\FFmpegError.cpp"><Filter>源文件</Filter></ClCompile>
+    <ClCompile Include="Audio\FFT\AudioPipelinePerformanceHelper.cpp"><Filter>源文件</Filter></ClCompile>
+    <ClCompile Include="Audio\FFT\FFTExecuter.cpp"><Filter>源文件</Filter></ClCompile>
+    <ClCompile Include="Audio\Pipeline\Device\AudioOutputDeviceLifecycle.cpp"><Filter>源文件</Filter></ClCompile>
+    <ClCompile Include="Audio\Pipeline\Device\Common\FAudioOutputDevice.cpp"><Filter>源文件</Filter></ClCompile>
+    <ClCompile Include="Audio\Pipeline\Device\Windows\WasapiExclusiveOutputDevice.cpp"><Filter>源文件</Filter></ClCompile>
+    <ClCompile Include="Audio\Pipeline\Observer\FFTAudioObserve.cpp"><Filter>源文件</Filter></ClCompile>
+    <ClCompile Include="Audio\Pipeline\Sink\AudioSinkFactory.cpp"><Filter>源文件</Filter></ClCompile>
+    <ClCompile Include="Audio\Pipeline\Sink\Common\FapoEqualizer.cpp"><Filter>源文件</Filter></ClCompile>
+    <ClCompile Include="Audio\Pipeline\Sink\Common\FAudioSink.cpp"><Filter>源文件</Filter></ClCompile>
+    <ClCompile Include="Audio\Pipeline\Sink\Windows\WasapiExclusiveSink.cpp"><Filter>源文件</Filter></ClCompile>
+    <ClCompile Include="Audio\Pipeline\Source\AudioFile.cpp"><Filter>源文件</Filter></ClCompile>
+    <ClCompile Include="Core\AudioThreadScheduleHelper.cpp"><Filter>源文件</Filter></ClCompile>
+    <ClCompile Include="Core\LocaleConverter.cpp"><Filter>源文件</Filter></ClCompile>
+    <ClCompile Include="Core\NativeLibraryRuntime.cpp"><Filter>源文件</Filter></ClCompile>
+    <ClCompile Include="Core\NativeTraceRedirect.cpp"><Filter>源文件</Filter></ClCompile>
+    <ClCompile Include="Crypto\NcmDecryptor.cpp"><Filter>源文件</Filter></ClCompile>
+    <ClCompile Include="Lyric\LrcFileController.cpp"><Filter>源文件</Filter></ClCompile>
+    <ClCompile Include="Lyric\LrcTextParser.cpp"><Filter>源文件</Filter></ClCompile>
+    <ClCompile Include="Lyric\MLPipeline\MLPipelineCommon.cpp"><Filter>源文件</Filter></ClCompile>
+    <ClCompile Include="Lyric\MLPipeline\NCNNPipeline.cpp"><Filter>源文件</Filter></ClCompile>
+    <ClCompile Include="Lyric\MLPipeline\VocabularyIO.cpp"><Filter>源文件</Filter></ClCompile>
+    <ClCompile Include="Managed\AssemblyInfo.cpp"><Filter>源文件</Filter></ClCompile>
+    <ClCompile Include="Managed\LocaleConverterManaged.cpp"><Filter>源文件</Filter></ClCompile>
+    <ClCompile Include="Managed\LrcFileControllerManaged.cpp"><Filter>源文件</Filter></ClCompile>
+    <ClCompile Include="Managed\ManagedLoggerFactory.cpp"><Filter>源文件</Filter></ClCompile>
+    <ClCompile Include="Managed\ManagedLogWriter.cpp"><Filter>源文件</Filter></ClCompile>
+    <ClCompile Include="Managed\MusicPlayerEventBridge.cpp"><Filter>源文件</Filter></ClCompile>
+    <ClCompile Include="Managed\MusicPlayerLibraryRuntime.cpp"><Filter>源文件</Filter></ClCompile>
+    <ClCompile Include="Managed\MusicPlayerManaged.cpp"><Filter>源文件</Filter></ClCompile>
+    <ClCompile Include="Managed\SmtcInteropHelper.cpp"><Filter>源文件</Filter></ClCompile>
+    <ClCompile Include="pch.cpp"><Filter>源文件</Filter></ClCompile>
+    <ClCompile Include="Platform\Common\AudioThreadSchedulerFactory.cpp"><Filter>源文件</Filter></ClCompile>
+    <ClCompile Include="Platform\Common\FileSystemFactory.cpp"><Filter>源文件</Filter></ClCompile>
+    <ClCompile Include="Platform\Common\NativeLogWriterFactory.cpp"><Filter>源文件</Filter></ClCompile>
+    <ClCompile Include="Platform\Common\VectorMemoryFile.cpp"><Filter>源文件</Filter></ClCompile>
+    <ClCompile Include="Platform\Windows\MMCSSHelper.cpp"><Filter>源文件</Filter></ClCompile>
+    <ClCompile Include="Platform\Windows\MMCSSHelperFactory.cpp"><Filter>源文件</Filter></ClCompile>
+    <ClCompile Include="Platform\Windows\WindowsApiDiskFile.cpp"><Filter>源文件</Filter></ClCompile>
+    <ClCompile Include="Platform\Windows\WindowsFileSystem.cpp"><Filter>源文件</Filter></ClCompile>
   </ItemGroup>
   <ItemGroup>
-    <ResourceCompile Include="app.rc">
-      <Filter>资源文件</Filter>
-    </ResourceCompile>
-  </ItemGroup>
-  <ItemGroup>
-    <Image Include="app.ico">
-      <Filter>资源文件</Filter>
-    </Image>
+    <ResourceCompile Include="app.rc"><Filter>资源文件</Filter></ResourceCompile>
+    <Image Include="app.ico"><Filter>资源文件</Filter></Image>
   </ItemGroup>
 </Project>

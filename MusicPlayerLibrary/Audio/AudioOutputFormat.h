@@ -18,6 +18,36 @@ extern "C" {
 
 namespace MusicPlayerLibrary
 {
+	inline constexpr int StandardAudioSampleRate = 48'000;
+	inline constexpr std::uint16_t FAudioExtensibleFormatExtraSize =
+		static_cast<std::uint16_t>(
+			sizeof(FAudioWaveFormatExtensible) - sizeof(FAudioWaveFormatEx));
+	inline constexpr FAudioGUID PcmAudioSubFormat{
+		0x00000001, 0x0000, 0x0010,
+		{0x80, 0x00, 0x00, 0xaa, 0x00, 0x38, 0x9b, 0x71}
+	};
+	inline constexpr FAudioGUID IeeeFloatAudioSubFormat{
+		0x00000003, 0x0000, 0x0010,
+		{0x80, 0x00, 0x00, 0xaa, 0x00, 0x38, 0x9b, 0x71}
+	};
+
+	enum class AudioBackend : int
+	{
+		FAudio = 0,
+#if defined(_WIN32)
+		WasapiExclusive = 1
+#endif
+	};
+
+	struct AudioOutputDeviceInfo
+	{
+		// Stable backend-specific identifier encoded as UTF-8. An empty requested
+		// identifier selects the backend's current default rendering device.
+		std::string id;
+		std::string display_name;
+		bool is_default = false;
+	};
+
 	enum class AudioChannelMode : int
 	{
 		Unknown = -1,
@@ -75,6 +105,9 @@ namespace MusicPlayerLibrary
 
 	struct AudioOutputFormat
 	{
+		AudioBackend requested_backend = AudioBackend::FAudio;
+		std::string requested_device_id;
+
 		// A zero sample rate and System enum values request the current default
 		// rendering-device format.
 		int requested_sample_rate = 0;
@@ -89,6 +122,20 @@ namespace MusicPlayerLibrary
 		std::string ffmpeg_channel_layout;
 		FAudioWaveFormatExtensible wave_format{};
 	};
+
+	[[nodiscard]] bool GuidEquals(
+		const FAudioGUID& left,
+		const FAudioGUID& right) noexcept;
+
+	// Compares the resolved PCM representation consumed by DSP/observer code.
+	// Backend choice and the original request are intentionally not part of the
+	// comparison once both formats have been resolved.
+	[[nodiscard]] bool AreResolvedPcmFormatsEqual(
+		const AudioOutputFormat& left,
+		const AudioOutputFormat& right) noexcept;
+
+	[[nodiscard]] FAudioWaveFormatExtensible
+		MakeFallbackAudioWaveFormat() noexcept;
 
 	// 根据显式指定的设备格式进行解析。将其设为公共方法，以便无需打开音频设备即可测试格式映射。
 	AudioOutputFormat ResolveAudioOutputFormat(

@@ -2,17 +2,12 @@
 
 #include "pch.h"
 #include "Platform/Common/VectorMemoryFile.h"
-#include <limits>
 #include <utility>
+
+#include "Core/FileSeek.h"
 
 namespace MusicPlayerLibrary
 {
-
-    VectorMemoryFile::~VectorMemoryFile()
-    {
-        Close();
-    }
-
     uint32_t VectorMemoryFile::Read(void* buffer, uint32_t count)
     {
         if (buffer == nullptr || count == 0 || position_ >= data_.size())
@@ -53,52 +48,18 @@ namespace MusicPlayerLibrary
 
     uint64_t VectorMemoryFile::Seek(int64_t offset, FileSeekOrigin origin)
     {
-        uint64_t base_position;
-        switch (origin)
-        {
-        case FileSeekOrigin::Begin:
-            base_position = 0;
-            break;
-        case FileSeekOrigin::Current:
-            base_position = position_;
-            break;
-        case FileSeekOrigin::End:
-            base_position = data_.size();
-            break;
-        default:
-            base_position = 0;
-            break;
-        }
-
         uint64_t new_position;
-        if (offset < 0)
+        if (!TryResolveFileSeekPosition(position_, data_.size(), offset, origin, new_position))
         {
-            const uint64_t distance = static_cast<uint64_t>(-(offset + 1)) + 1;
-            if (distance > base_position)
-            {
+            if (offset < 0)
                 NATIVE_TRACE("err: memory file seek before begin\n");
-                return SeekFailure;
-            }
-            new_position = base_position - distance;
-        }
-        else
-        {
-            const uint64_t distance = static_cast<uint64_t>(offset);
-            if (base_position > (std::numeric_limits<uint64_t>::max)() - distance)
-            {
+            else
                 NATIVE_TRACE("err: memory file seek position overflow\n");
-                return SeekFailure;
-            }
-            new_position = base_position + distance;
+            return SeekFailure;
         }
 
         position_ = new_position;
         return position_;
-    }
-
-    void VectorMemoryFile::SeekToBegin()
-    {
-        position_ = 0;
     }
 
     uint64_t VectorMemoryFile::GetLength() const
