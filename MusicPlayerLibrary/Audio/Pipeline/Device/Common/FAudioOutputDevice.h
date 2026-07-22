@@ -3,20 +3,23 @@
 #pragma once
 
 #include <memory>
-#include <mutex>
+#include <vector>
 
 #include <FAudio.h>
 
 #include "Audio/AudioOutputFormat.h"
+#include "Audio/FAudioResource.h"
 
 namespace MusicPlayerLibrary
 {
 	class FAudioOutputDevice final
 	{
-		FAudio* engine_ = nullptr;
-		FAudioMasteringVoice* mastering_voice_ = nullptr;
+		UniqueFAudio engine_;
+		UniqueFAudioVoice mastering_voice_;
 		AudioOutputFormat output_format_{};
 		FAudioWaveFormatExtensible system_format_{};
+		AudioOutputDeviceInfo device_info_{};
+		std::uint32_t device_index_ = 0;
 
 		explicit FAudioOutputDevice(const AudioOutputFormat& requested);
 
@@ -27,10 +30,24 @@ namespace MusicPlayerLibrary
 
 		[[nodiscard]] static std::shared_ptr<FAudioOutputDevice> Acquire(
 			const AudioOutputFormat& requested = {});
+		[[nodiscard]] static std::vector<AudioOutputDeviceInfo>
+			EnumerateOutputDevices();
 		// Releases the application-lifetime cache. Existing sinks retain their
 		// shared reference until their source voices have been destroyed.
 		static void ShutdownShared() noexcept;
-		[[nodiscard]] FAudio* GetEngine() const noexcept { return engine_; }
+		[[nodiscard]] FAudio* GetEngine() const noexcept { return engine_.get(); }
+		[[nodiscard]] const AudioOutputDeviceInfo& GetDeviceInfo() const noexcept
+		{
+			return device_info_;
+		}
+		[[nodiscard]] const std::string& GetDeviceId() const noexcept
+		{
+			return device_info_.id;
+		}
+		[[nodiscard]] std::uint32_t GetDeviceIndex() const noexcept
+		{
+			return device_index_;
+		}
 		[[nodiscard]] const AudioOutputFormat& GetOutputFormat() const noexcept
 		{
 			return output_format_;

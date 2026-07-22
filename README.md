@@ -52,7 +52,8 @@ A simple music player, focused on audio pipeline and lyric experience.
 ![miniplayer](screenshots/miniplayer.png)
 
 ## Current implemented features:
-- Configurable audio output sample rate, from 8kHz (telephone quality) to 192kHz (Hi-Res audio)
+- Configurable audio output sample rate, from 8kHz (telephone quality) to 192kHz (Hi-Res audio) (only in FAudio shared mode)
+- Exclusive audio output and bit-perfect decode-play pipeline (only in WASAPI exclusive mode)
 - Play/pause/stop
 - Seek bar
 - Volume control
@@ -75,7 +76,7 @@ Still work in progress. 3rd party libraries are managed by vcpkg.
 - [x] remove C++/CLI, rewrite `MusicPlayerLibary` to pure C++ implementation
 - [x] isolate neseccary Windows API Calls, write cross-platform alternatives
 - [ ] Migrating to Avalonia, extend platform support to Linux / macOS
-- [ ] PcmProvider / PcmSubmitter / PcmObserver refractor, plugable, preemptive rewrite
+- [x] PcmProvider / PcmSubmitter / PcmObserver refractor, plugable, preemptive rewrite
 - [ ] Extract `MusicPlayerLibrary` into an audio middleware
 - You can submit your ideas in issues, or contact me directly by email.
 

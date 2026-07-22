@@ -11,6 +11,16 @@ namespace WpfMusicPlayer.Models
 
         public class AudioSettings
         {
+            public enum BackendType
+            {
+                [XmlEnum("faudio")] FAudio = 0,
+#if WINDOWS
+                [XmlEnum("wasapi-exclusive")] WasapiExclusive = 1
+#endif
+            }
+
+            [XmlElement("backend")] public BackendType Backend { get; set; } = BackendType.FAudio;
+            [XmlElement("output-device-id")] public string OutputDeviceId { get; set; } = string.Empty;
             [XmlElement("sample-rate")] public int SampleRate { get; set; } = 44100;
 
             public enum ChannelType

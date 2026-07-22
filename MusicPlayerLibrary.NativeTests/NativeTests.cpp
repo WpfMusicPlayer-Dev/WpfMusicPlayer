@@ -6,13 +6,18 @@
     DOCTEST_REQUIRE_MESSAGE(static_cast<bool>(condition), __VA_ARGS__)
 
 #include "Audio/AudioOutputFormat.h"
+#include "Audio/AudioOutputCapabilities.h"
 #include "Audio/Pipeline/AudioPipeline.h"
 #include "Audio/DSP/EqualizerDsp.h"
-#include "Audio/DSP/FapoEqualizer.h"
-#include "Audio/Pipeline/Sink/FAudioSink.h"
+#include "Audio/DSP/PcmSampleConversion.h"
+#include "Audio/FFmpeg/FFmpegResource.h"
+#include "Audio/Pipeline/Sink/Common/FapoEqualizer.h"
+#include "Audio/Pipeline/Sink/Common/FAudioSink.h"
 #include "Audio/Pipeline/Observer/FFTAudioObserve.h"
+#include "Audio/Pipeline/Windows/WasapiAudioHelpers.h"
 #include "Audio/FFT/AudioPipelinePerformanceHelper.h"
 #include "Audio/FFT/FFTExecuter.h"
+#include "Lyric/LrcTextParser.h"
 
 #include <FAPOBase.h>
 
@@ -53,6 +58,9 @@ namespace
     using MusicPlayerLibrary::IAudioSink;
     using MusicPlayerLibrary::IAudioSource;
     using MusicPlayerLibrary::NormalizedPcmBlock;
+    using MusicPlayerLibrary::UniqueAvAudioFifo;
+    using MusicPlayerLibrary::UniqueAvFilterGraph;
+    using MusicPlayerLibrary::UniqueSwrContext;
     using MusicPlayerLibrary::GetAudioPipelineBufferingProfile;
     using MusicPlayerLibrary::SelectAudioPipelineBufferingProfile;
 
@@ -238,6 +246,11 @@ namespace
             }
         }
 
+		[[nodiscard]] bool IsExclusiveModeEnabled() noexcept override
+		{
+			return false;
+		}
+
         bool SignalStreamEnd(const AudioStreamGeneration generation) noexcept
         {
             if (generation != state_.generation || generation != eos_generation_)
@@ -395,20 +408,6 @@ namespace
         }
     };
 
-    constexpr FAudioGUID PcmSubFormat{
-        0x00000001, 0x0000, 0x0010,
-        {0x80, 0x00, 0x00, 0xaa, 0x00, 0x38, 0x9b, 0x71}
-    };
-    constexpr FAudioGUID IeeeFloatSubFormat{
-        0x00000003, 0x0000, 0x0010,
-        {0x80, 0x00, 0x00, 0xaa, 0x00, 0x38, 0x9b, 0x71}
-    };
-
-    bool SameGuid(const FAudioGUID& left, const FAudioGUID& right) noexcept
-    {
-        return std::memcmp(&left, &right, sizeof(FAudioGUID)) == 0;
-    }
-
     void RequireClose(float expected, float actual, float tolerance,
                       std::string_view message)
     {
@@ -416,46 +415,6 @@ namespace
             std::isfinite(actual) && std::abs(expected - actual) <= tolerance,
             message);
     }
-
-    struct FapoReleaser
-    {
-        void operator()(FAPO* effect) const noexcept
-        {
-            if (effect != nullptr)
-                effect->Release(effect);
-        }
-    };
-    using UniqueFapo = std::unique_ptr<FAPO, FapoReleaser>;
-
-    struct FilterGraphReleaser
-    {
-        void operator()(AVFilterGraph* graph) const noexcept
-        {
-            if (graph != nullptr)
-                avfilter_graph_free(&graph);
-        }
-    };
-    using UniqueFilterGraph = std::unique_ptr<AVFilterGraph, FilterGraphReleaser>;
-
-    struct SwrContextReleaser
-    {
-        void operator()(SwrContext* context) const noexcept
-        {
-            if (context != nullptr)
-                swr_free(&context);
-        }
-    };
-    using UniqueSwrContext = std::unique_ptr<SwrContext, SwrContextReleaser>;
-
-    struct AudioFifoReleaser
-    {
-        void operator()(AVAudioFifo* fifo) const noexcept
-        {
-            if (fifo != nullptr)
-                av_audio_fifo_free(fifo);
-        }
-    };
-    using UniqueAudioFifo = std::unique_ptr<AVAudioFifo, AudioFifoReleaser>;
 
     UniqueFapo MakeFapo(
         const EqualizerDspSnapshot& initial,
@@ -481,13 +440,12 @@ namespace
         format.Format.nAvgBytesPerSec =
             sampleRate * format.Format.nBlockAlign;
         format.Format.wBitsPerSample = 32;
-        format.Format.cbSize = static_cast<std::uint16_t>(
-            sizeof(FAudioWaveFormatExtensible) - sizeof(FAudioWaveFormatEx));
+		format.Format.cbSize = MusicPlayerLibrary::FAudioExtensibleFormatExtraSize;
         format.Samples.wValidBitsPerSample = 32;
         format.dwChannelMask = channelCount == 2
             ? SPEAKER_FRONT_LEFT | SPEAKER_FRONT_RIGHT
             : 0;
-        format.SubFormat = IeeeFloatSubFormat;
+		format.SubFormat = MusicPlayerLibrary::IeeeFloatAudioSubFormat;
         return format;
     }
 
@@ -505,11 +463,10 @@ namespace
         format.Format.nAvgBytesPerSec =
             sampleRate * format.Format.nBlockAlign;
         format.Format.wBitsPerSample = containerBits;
-        format.Format.cbSize = static_cast<std::uint16_t>(
-            sizeof(FAudioWaveFormatExtensible) - sizeof(FAudioWaveFormatEx));
+		format.Format.cbSize = MusicPlayerLibrary::FAudioExtensibleFormatExtraSize;
         format.Samples.wValidBitsPerSample = 24;
         format.dwChannelMask = channelCount == 2 ? SPEAKER_STEREO : 0;
-        format.SubFormat = PcmSubFormat;
+		format.SubFormat = MusicPlayerLibrary::PcmAudioSubFormat;
         return format;
     }
 
@@ -605,29 +562,29 @@ namespace
             : FFTExecuter(format)
         {
             StopFFTThread();
-            fft_in.resize(fft_size);
-            fft_out.resize(fft_size);
+            fft_in.resize(FftSize);
+            fft_out.resize(FftSize);
         }
 
         [[nodiscard]] std::size_t FrameCount() const noexcept
         {
-            return fft_size;
+            return FftSize;
         }
 
         [[nodiscard]] std::size_t FrameByteCount() const noexcept
         {
-            return fft_size * 2 * sizeof(std::int16_t);
+            return FftSize * BytesPerFrame;
         }
 
         [[nodiscard]] int SampleRate() const noexcept
         {
-            return sample_rate;
+            return MusicPlayerLibrary::StandardAudioSampleRate;
         }
 
         [[nodiscard]] std::vector<std::size_t> Boundaries()
         {
             return GenBoundaries(
-                static_cast<float>(sample_rate), fft_size,
+                static_cast<float>(MusicPlayerLibrary::StandardAudioSampleRate), FftSize,
                 static_cast<std::size_t>(32), 20.0f, 20000.0f);
         }
 
@@ -1005,10 +962,6 @@ namespace
 
     void TestNyquistAndConfiguredRates()
     {
-        constexpr std::array<std::uint32_t, 9> SampleRates{
-            8000, 11025, 16000, 22050, 44100,
-            48000, 88200, 96000, 192000
-        };
         constexpr std::uint32_t FrameCount = 1024;
 
         auto config = MakeDefaultTenBandConfig();
@@ -1018,7 +971,7 @@ namespace
             band.gain_db = 3.0f;
         }
 
-        for (const auto sampleRate : SampleRates)
+        for (const auto sampleRate : MusicPlayerLibrary::AudioOutputProbeSampleRates)
         {
             const auto snapshot = CompileEqualizerSnapshot(config, sampleRate, 3);
             for (const auto& coefficients : snapshot.bands)
@@ -1660,7 +1613,7 @@ namespace
                 "FAPO accepted a non-extensible float format");
 
         auto pcm = valid;
-        pcm.SubFormat = PcmSubFormat;
+		pcm.SubFormat = MusicPlayerLibrary::PcmAudioSubFormat;
         NATIVE_REQUIRE(LockFapo(effect.get(), pcm, pcm) != FAUDIO_OK,
                 "FAPO accepted a non-float32 extensible format");
 
@@ -1942,6 +1895,43 @@ namespace
 				matchingFloat, floatOutput),
 			"packed float32 did not satisfy its exact sink contract");
 
+		AudioOutputFormat legacyPcm16{};
+		AudioOutputFormat legacyFloat32{};
+		const auto pcm32Output =
+			MusicPlayerLibrary::MakeWasapiPcm32Variant(floatOutput);
+		AudioOutputFormat legacyPcm32{};
+		const DecodedAudioFormat matchingPcm32{
+			.sample_rate = 48000,
+			.channel_count = 2,
+			.channel_mask = SPEAKER_STEREO,
+			.bit_depth = 32,
+			.sample_format = AV_SAMPLE_FMT_S32
+		};
+		NATIVE_REQUIRE(
+			MusicPlayerLibrary::TryMakeWasapiLegacyVariant(output, legacyPcm16) &&
+			MusicPlayerLibrary::AreAudioFormatsBitPerfect(
+				matching, legacyPcm16),
+			"exact legacy PCM16 unnecessarily required normalization");
+		NATIVE_REQUIRE(
+			MusicPlayerLibrary::TryMakeWasapiLegacyVariant(
+				floatOutput, legacyFloat32) &&
+			MusicPlayerLibrary::AreAudioFormatsBitPerfect(
+				matchingFloat, legacyFloat32),
+			"exact legacy float32 unnecessarily required normalization");
+		NATIVE_REQUIRE(
+			MusicPlayerLibrary::TryMakeWasapiLegacyVariant(
+				pcm32Output, legacyPcm32) &&
+			MusicPlayerLibrary::AreAudioFormatsBitPerfect(
+				matchingPcm32, legacyPcm32),
+			"exact legacy PCM32 unnecessarily required normalization");
+		auto malformedLegacy = legacyPcm16;
+		malformedLegacy.wave_format.Format.wFormatTag =
+			FAUDIO_FORMAT_IEEE_FLOAT;
+		NATIVE_REQUIRE(
+			!MusicPlayerLibrary::AreAudioFormatsBitPerfect(
+				matching, malformedLegacy),
+			"a legacy descriptor with the wrong encoding was marked bit-perfect");
+
         auto mismatch = matching;
         mismatch.sample_rate = 44100;
         NATIVE_REQUIRE(!MusicPlayerLibrary::AreAudioFormatsBitPerfect(
@@ -1994,7 +1984,8 @@ namespace
 				matching, malformedOutput),
 			"inconsistent sink WAVE channel mask was marked bit-perfect");
 		malformedOutput = output;
-		malformedOutput.wave_format.SubFormat = IeeeFloatSubFormat;
+		malformedOutput.wave_format.SubFormat =
+			MusicPlayerLibrary::IeeeFloatAudioSubFormat;
 		NATIVE_REQUIRE(!MusicPlayerLibrary::AreAudioFormatsBitPerfect(
 				matching, malformedOutput),
 			"inconsistent sink WAVE subformat was marked bit-perfect");
@@ -2124,17 +2115,17 @@ namespace
     {
         const double thresholdBitrate =
             MusicPlayerLibrary::CalculateAverageAudioBitrateBitsPerSecond(
-                20000000, 200.0);
-        NATIVE_REQUIRE(std::abs(thresholdBitrate - 800000.0) < 1.0e-9,
+                15000000, 200.0);
+        NATIVE_REQUIRE(std::abs(thresholdBitrate - 600000.0) < 1.0e-9,
                 "whole-stream average bitrate was calculated incorrectly");
         NATIVE_REQUIRE(!MusicPlayerLibrary::IsLoselessAudio(thresholdBitrate),
-                "exactly 800 kbit/s was classified as loseless audio");
+                "exactly 600 kbit/s was classified as loseless audio");
 
         const double aboveThresholdBitrate =
             MusicPlayerLibrary::CalculateAverageAudioBitrateBitsPerSecond(
                 25000000, 200.0);
         NATIVE_REQUIRE(MusicPlayerLibrary::IsLoselessAudio(aboveThresholdBitrate),
-                "audio above 800 kbit/s was not classified as loseless");
+                "audio above 600 kbit/s was not classified as loseless");
         NATIVE_REQUIRE(!MusicPlayerLibrary::IsLoselessAudio(
                     MusicPlayerLibrary::CalculateAverageAudioBitrateBitsPerSecond(
                         25000000, 0.0)),
@@ -2174,7 +2165,9 @@ namespace
                     waveFormat.Format.wBitsPerSample == 32 &&
                     waveFormat.Samples.wValidBitsPerSample == 24 &&
                     waveFormat.Format.nBlockAlign == 8 &&
-                    SameGuid(waveFormat.SubFormat, PcmSubFormat),
+                    MusicPlayerLibrary::GuidEquals(
+                        waveFormat.SubFormat,
+						MusicPlayerLibrary::PcmAudioSubFormat),
                 "explicit 24-bit output did not use 24-valid-in-32 PCM");
         RequirePackedFrameLayoutMatchesFaudio(resolved, 257);
     }
@@ -2202,7 +2195,7 @@ namespace
         systemFormat.Format.wFormatTag = FAUDIO_FORMAT_EXTENSIBLE;
         systemFormat.Format.wBitsPerSample = 16;
         systemFormat.Samples.wValidBitsPerSample = 16;
-        systemFormat.SubFormat = PcmSubFormat;
+		systemFormat.SubFormat = MusicPlayerLibrary::PcmAudioSubFormat;
         const auto pcmResolved = MusicPlayerLibrary::ResolveAudioOutputFormat(
             MusicPlayerLibrary::AudioOutputFormat{}, systemFormat);
         NATIVE_REQUIRE(pcmResolved.bit_depth == MusicPlayerLibrary::AudioBitDepth::Bit16 &&
@@ -2233,7 +2226,9 @@ namespace
                         waveFormat.Format.wBitsPerSample == 32 &&
                         waveFormat.Samples.wValidBitsPerSample == 24 &&
                         waveFormat.Format.nBlockAlign == 8 &&
-                        SameGuid(waveFormat.SubFormat, PcmSubFormat),
+                        MusicPlayerLibrary::GuidEquals(
+                            waveFormat.SubFormat,
+							MusicPlayerLibrary::PcmAudioSubFormat),
                     "System PCM24 format did not normalize to 24-valid-in-32 PCM");
             RequirePackedFrameLayoutMatchesFaudio(resolved, 511);
         }
@@ -2242,21 +2237,9 @@ namespace
     void TestAresampleAcceptsOutputFormats()
     {
         const auto systemFormat = MakeFloatFormat(48000, 2);
-        constexpr MusicPlayerLibrary::AudioChannelMode channelModes[] = {
-            MusicPlayerLibrary::AudioChannelMode::Mono,
-            MusicPlayerLibrary::AudioChannelMode::Stereo,
-            MusicPlayerLibrary::AudioChannelMode::Surround51,
-            MusicPlayerLibrary::AudioChannelMode::Surround71
-        };
-        constexpr MusicPlayerLibrary::AudioBitDepth bitDepths[] = {
-            MusicPlayerLibrary::AudioBitDepth::Bit16,
-            MusicPlayerLibrary::AudioBitDepth::Bit24,
-            MusicPlayerLibrary::AudioBitDepth::Bit32
-        };
-
-        for (const auto channelMode : channelModes)
+        for (const auto channelMode : MusicPlayerLibrary::AudioOutputProbeChannelModes)
         {
-            for (const auto bitDepth : bitDepths)
+            for (const auto bitDepth : MusicPlayerLibrary::AudioOutputProbeBitDepths)
             {
                 MusicPlayerLibrary::AudioOutputFormat requested{};
                 requested.requested_sample_rate = 48000;
@@ -2268,7 +2251,7 @@ namespace
                 NATIVE_REQUIRE(sampleFormatName != nullptr,
                         "resolved output format has no FFmpeg sample-format name");
 
-                UniqueFilterGraph graph(avfilter_graph_alloc());
+                UniqueAvFilterGraph graph(avfilter_graph_alloc());
                 NATIVE_REQUIRE(graph != nullptr, "avfilter_graph_alloc failed");
                 AVFilterContext* source = nullptr;
                 AVFilterContext* resample = nullptr;
@@ -2380,7 +2363,7 @@ namespace
                     FrameCount * format.wave_format.Format.nBlockAlign),
                 "PCM24 test storage does not contain whole FAudio frames");
 
-        UniqueAudioFifo fifo(av_audio_fifo_alloc(
+        UniqueAvAudioFifo fifo(av_audio_fifo_alloc(
             format.sample_format, format.channel_count, FrameCount));
         NATIVE_REQUIRE(fifo != nullptr, "failed to allocate the PCM24 audio FIFO");
         void* writePlanes[] = {const_cast<std::int32_t*>(input.data())};
@@ -3040,6 +3023,382 @@ namespace
 		sink->AbortStream();
     }
 
+	void TestWasapiClockHealthAcceptsNormalRate()
+	{
+		MusicPlayerLibrary::WasapiClockHealthMonitor monitor;
+		constexpr std::uint64_t Frequency = 48'000;
+		constexpr std::uint64_t QpcStart = 50'000'000;
+
+		NATIVE_REQUIRE(!monitor.Observe(0, Frequency, QpcStart),
+			"the first WASAPI clock sample requested recovery");
+		NATIVE_REQUIRE(!monitor.Observe(12'000, Frequency, QpcStart + 2'500'000) &&
+			!monitor.Observe(24'000, Frequency, QpcStart + 5'000'000),
+			"a normally advancing 48 kHz WASAPI clock requested recovery");
+	}
+
+	void TestWasapiClockHealthIgnoresShortJitter()
+	{
+		MusicPlayerLibrary::WasapiClockHealthMonitor monitor;
+		constexpr std::uint64_t Frequency = 48'000;
+		constexpr std::uint64_t PositionStart = 1'000'000;
+		constexpr std::uint64_t QpcStart = 70'000'000;
+
+		NATIVE_REQUIRE(!monitor.Observe(PositionStart, Frequency, QpcStart) &&
+			!monitor.Observe(
+				PositionStart + 960, Frequency, QpcStart + 1'000'000),
+			"a sub-window WASAPI scheduling jitter requested recovery");
+		NATIVE_REQUIRE(!monitor.Observe(
+				PositionStart + 12'000, Frequency, QpcStart + 2'500'000) &&
+			!monitor.Observe(
+				PositionStart + 24'000, Frequency, QpcStart + 5'000'000),
+			"a short WASAPI clock jitter was not allowed to catch up");
+	}
+
+	void TestWasapiClockHealthSupports44100Hz()
+	{
+		MusicPlayerLibrary::WasapiClockHealthMonitor monitor;
+		constexpr std::uint64_t Frequency = 44'100;
+		constexpr std::uint64_t QpcStart = 90'000'000;
+
+		NATIVE_REQUIRE(!monitor.Observe(0, Frequency, QpcStart) &&
+			!monitor.Observe(11'025, Frequency, QpcStart + 2'500'000) &&
+			!monitor.Observe(22'050, Frequency, QpcStart + 5'000'000),
+			"a normally advancing 44.1 kHz WASAPI clock requested recovery");
+	}
+
+	void TestWasapiClockHealthRequiresTwoSlowWindows()
+	{
+		MusicPlayerLibrary::WasapiClockHealthMonitor monitor;
+		constexpr std::uint64_t Frequency = 48'000;
+		constexpr std::uint64_t QpcStart = 110'000'000;
+
+		NATIVE_REQUIRE(!monitor.Observe(0, Frequency, QpcStart) &&
+			!monitor.Observe(7'200, Frequency, QpcStart + 2'500'000),
+			"one slow WASAPI clock window requested recovery");
+		NATIVE_REQUIRE(!monitor.Observe(
+				19'200, Frequency, QpcStart + 5'000'000) &&
+			!monitor.Observe(
+				26'400, Frequency, QpcStart + 7'500'000),
+			"a healthy WASAPI clock window did not break the slow-window sequence");
+		NATIVE_REQUIRE(monitor.Observe(
+				33'600, Frequency, QpcStart + 10'000'000),
+			"two consecutive 60 percent WASAPI clock windows did not request recovery");
+	}
+
+	void TestWasapiClockHealthResetClearsSlowHistory()
+	{
+		MusicPlayerLibrary::WasapiClockHealthMonitor monitor;
+		constexpr std::uint64_t Frequency = 48'000;
+		constexpr std::uint64_t QpcStart = 130'000'000;
+
+		NATIVE_REQUIRE(!monitor.Observe(0, Frequency, QpcStart) &&
+			!monitor.Observe(7'200, Frequency, QpcStart + 2'500'000) &&
+			monitor.Observe(14'400, Frequency, QpcStart + 5'000'000),
+			"the reset test did not first reach the recovery threshold");
+		monitor.Reset();
+		NATIVE_REQUIRE(!monitor.Observe(0, Frequency, QpcStart + 5'100'000) &&
+			!monitor.Observe(12'000, Frequency, QpcStart + 7'600'000) &&
+			!monitor.Observe(24'000, Frequency, QpcStart + 10'100'000),
+			"a reset WASAPI clock monitor retained stale slow-window history");
+	}
+
+	void TestWasapiMixFormatConversion()
+	{
+		WAVEFORMATEX pcm16{};
+		pcm16.wFormatTag = WAVE_FORMAT_PCM;
+		pcm16.nChannels = 2;
+		pcm16.nSamplesPerSec = 44'100;
+		pcm16.wBitsPerSample = 16;
+		pcm16.nBlockAlign = 4;
+		pcm16.nAvgBytesPerSec = pcm16.nSamplesPerSec * pcm16.nBlockAlign;
+		FAudioWaveFormatExtensible converted{};
+		NATIVE_REQUIRE(
+			MusicPlayerLibrary::TryToFAudioWaveFormatExtensible(
+				&pcm16, converted),
+			"legacy PCM16 endpoint mix format was rejected");
+		const auto pcm16Resolved = MusicPlayerLibrary::ResolveAudioOutputFormat(
+			AudioOutputFormat{}, converted);
+		NATIVE_REQUIRE(
+			pcm16Resolved.sample_rate == 44'100 &&
+			pcm16Resolved.channel_count == 2 &&
+			pcm16Resolved.bit_depth == MusicPlayerLibrary::AudioBitDepth::Bit16,
+			"legacy PCM16 endpoint mix format was not preserved");
+
+		WAVEFORMATEX float32 = pcm16;
+		float32.wFormatTag = WAVE_FORMAT_IEEE_FLOAT;
+		float32.nSamplesPerSec = 48'000;
+		float32.wBitsPerSample = 32;
+		float32.nBlockAlign = 8;
+		float32.nAvgBytesPerSec =
+			float32.nSamplesPerSec * float32.nBlockAlign;
+		NATIVE_REQUIRE(
+			MusicPlayerLibrary::TryToFAudioWaveFormatExtensible(
+				&float32, converted) &&
+			MusicPlayerLibrary::GuidEquals(
+				converted.SubFormat,
+				MusicPlayerLibrary::IeeeFloatAudioSubFormat),
+			"legacy float32 endpoint mix format was rejected");
+
+		AudioOutputFormat pcm24Request{};
+		pcm24Request.requested_sample_rate = 96'000;
+		pcm24Request.requested_channel_mode =
+			MusicPlayerLibrary::AudioChannelMode::Surround51;
+		pcm24Request.requested_bit_depth =
+			MusicPlayerLibrary::AudioBitDepth::Bit24;
+		const auto pcm24Expected = MusicPlayerLibrary::ResolveAudioOutputFormat(
+			pcm24Request, MusicPlayerLibrary::MakeFallbackAudioWaveFormat());
+		auto pcm24Windows =
+			MusicPlayerLibrary::ToWindowsWaveFormatExtensible(pcm24Expected);
+		NATIVE_REQUIRE(
+			MusicPlayerLibrary::TryToFAudioWaveFormatExtensible(
+				&pcm24Windows.Format, converted) &&
+			converted.Format.cbSize ==
+				MusicPlayerLibrary::FAudioExtensibleFormatExtraSize &&
+			converted.Samples.wValidBitsPerSample == 24 &&
+			converted.dwChannelMask == pcm24Expected.channel_mask,
+			"extensible PCM24-in-32 endpoint mix format was not preserved");
+		const auto pcm24Resolved = MusicPlayerLibrary::ResolveAudioOutputFormat(
+			AudioOutputFormat{}, converted);
+		NATIVE_REQUIRE(
+			MusicPlayerLibrary::AreResolvedPcmFormatsEqual(
+				pcm24Expected, pcm24Resolved),
+			"converted PCM24-in-32 endpoint mix format changed PCM geometry");
+
+		auto malformed = pcm24Windows;
+		malformed.Format.cbSize = static_cast<WORD>(
+			sizeof(WAVEFORMATEXTENSIBLE) - sizeof(WAVEFORMATEX) - 1);
+		NATIVE_REQUIRE(
+			!MusicPlayerLibrary::TryToFAudioWaveFormatExtensible(
+				&malformed.Format, converted),
+			"undersized extensible endpoint mix format was accepted");
+		malformed = pcm24Windows;
+		malformed.SubFormat.Data1 ^= 1u;
+		NATIVE_REQUIRE(
+			!MusicPlayerLibrary::TryToFAudioWaveFormatExtensible(
+				&malformed.Format, converted),
+			"unknown extensible endpoint subformat was accepted");
+		malformed = pcm24Windows;
+		malformed.dwChannelMask = SPEAKER_FRONT_LEFT;
+		NATIVE_REQUIRE(
+			!MusicPlayerLibrary::TryToFAudioWaveFormatExtensible(
+				&malformed.Format, converted),
+			"endpoint mix format with inconsistent channel mask was accepted");
+	}
+
+	void TestWasapiExclusiveProbeFallbacksAndWireVariants()
+	{
+		AudioOutputFormat requested{};
+		requested.requested_sample_rate = 96'000;
+		requested.requested_channel_mode =
+			MusicPlayerLibrary::AudioChannelMode::Surround51;
+		requested.requested_bit_depth =
+			MusicPlayerLibrary::AudioBitDepth::Bit32;
+
+		AudioOutputFormat preferred_request{};
+		preferred_request.requested_sample_rate = 48'000;
+		preferred_request.requested_channel_mode =
+			MusicPlayerLibrary::AudioChannelMode::Stereo;
+		preferred_request.requested_bit_depth =
+			MusicPlayerLibrary::AudioBitDepth::Bit32;
+		const auto preferred = MusicPlayerLibrary::ResolveAudioOutputFormat(
+			preferred_request, MusicPlayerLibrary::MakeFallbackAudioWaveFormat());
+		const auto axes = MusicPlayerLibrary::BuildWasapiExclusiveProbeAxes(
+			requested, preferred);
+
+		NATIVE_REQUIRE(
+			!axes.sample_rates.empty() && axes.sample_rates.front() == 96'000 &&
+			std::find(axes.sample_rates.begin(), axes.sample_rates.end(), 48'000) !=
+				axes.sample_rates.end() &&
+			std::find(axes.sample_rates.begin(), axes.sample_rates.end(), 44'100) !=
+				axes.sample_rates.end(),
+			"an explicit WASAPI sample rate suppressed safe fallback rates");
+		NATIVE_REQUIRE(
+			!axes.channel_modes.empty() && axes.channel_modes.front() ==
+				MusicPlayerLibrary::AudioChannelMode::Surround51 &&
+			std::find(
+				axes.channel_modes.begin(), axes.channel_modes.end(),
+				MusicPlayerLibrary::AudioChannelMode::Stereo) !=
+				axes.channel_modes.end(),
+			"an explicit WASAPI channel mode suppressed the stereo fallback");
+		NATIVE_REQUIRE(
+			!axes.bit_depths.empty() && axes.bit_depths.front() ==
+				MusicPlayerLibrary::AudioBitDepth::Bit32 &&
+			std::find(
+				axes.bit_depths.begin(), axes.bit_depths.end(),
+				MusicPlayerLibrary::AudioBitDepth::Bit24) !=
+				axes.bit_depths.end() &&
+			std::find(
+				axes.bit_depths.begin(), axes.bit_depths.end(),
+				MusicPlayerLibrary::AudioBitDepth::Bit16) !=
+				axes.bit_depths.end(),
+			"an explicit WASAPI bit depth suppressed integer PCM fallbacks");
+
+		AudioOutputFormat pcm16_request = preferred_request;
+		pcm16_request.requested_bit_depth =
+			MusicPlayerLibrary::AudioBitDepth::Bit16;
+		const auto pcm16 = MusicPlayerLibrary::ResolveAudioOutputFormat(
+			pcm16_request, MusicPlayerLibrary::MakeFallbackAudioWaveFormat());
+		AudioOutputFormat legacy_pcm16{};
+		NATIVE_REQUIRE(
+			MusicPlayerLibrary::TryMakeWasapiLegacyVariant(
+				pcm16, legacy_pcm16) &&
+			legacy_pcm16.wave_format.Format.wFormatTag == WAVE_FORMAT_PCM &&
+			legacy_pcm16.wave_format.Format.cbSize == 0,
+			"stereo PCM16 did not produce a legacy WASAPI descriptor");
+		const auto extensible_pcm16_wave =
+			MusicPlayerLibrary::ToWindowsWaveFormatExtensible(pcm16);
+		const auto legacy_pcm16_wave =
+			MusicPlayerLibrary::ToWindowsWaveFormatExtensible(legacy_pcm16);
+		NATIVE_REQUIRE(
+			!MusicPlayerLibrary::AreWasapiWireFormatsEqual(
+				extensible_pcm16_wave, legacy_pcm16_wave),
+			"legacy and extensible PCM16 descriptors were incorrectly deduplicated");
+
+		AudioOutputFormat surround_request = pcm16_request;
+		surround_request.requested_channel_mode =
+			MusicPlayerLibrary::AudioChannelMode::Surround51;
+		const auto surround = MusicPlayerLibrary::ResolveAudioOutputFormat(
+			surround_request, MusicPlayerLibrary::MakeFallbackAudioWaveFormat());
+		AudioOutputFormat invalid_legacy{};
+		NATIVE_REQUIRE(
+			!MusicPlayerLibrary::TryMakeWasapiLegacyVariant(
+				surround, invalid_legacy),
+			"a multichannel WASAPI descriptor was downgraded to legacy WAVEFORMATEX");
+
+		const auto pcm32 = MusicPlayerLibrary::MakeWasapiPcm32Variant(preferred);
+		NATIVE_REQUIRE(
+			pcm32.bit_depth == MusicPlayerLibrary::AudioBitDepth::Bit32 &&
+			pcm32.sample_format == AV_SAMPLE_FMT_S32 &&
+			MusicPlayerLibrary::GuidEquals(
+				pcm32.wave_format.SubFormat,
+				MusicPlayerLibrary::PcmAudioSubFormat) &&
+			!MusicPlayerLibrary::AreWasapiWireFormatsEqual(
+				MusicPlayerLibrary::ToWindowsWaveFormatExtensible(preferred),
+				MusicPlayerLibrary::ToWindowsWaveFormatExtensible(pcm32)),
+			"integer PCM32 and float32 WASAPI descriptors collapsed together");
+	}
+
+	void TestPcm32IntegerConversion()
+	{
+		constexpr std::array<float, 5> Samples{
+			-1.0f, -0.5f, 0.0f, 0.5f, 1.0f
+		};
+		std::array<std::uint8_t, Samples.size() * sizeof(std::int32_t)> bytes{};
+		NATIVE_REQUIRE(
+			EncodePcmSamples(
+				Samples, bytes,
+				MusicPlayerLibrary::AudioBitDepth::Bit32,
+				AV_SAMPLE_FMT_S32),
+			"float samples could not be encoded as signed PCM32");
+
+		std::array<std::int32_t, Samples.size()> encoded{};
+		std::memcpy(encoded.data(), bytes.data(), bytes.size());
+		NATIVE_REQUIRE(
+			encoded[0] == (std::numeric_limits<std::int32_t>::min)() &&
+			encoded[1] == -1'073'741'824 && encoded[2] == 0 &&
+			encoded[3] == 1'073'741'824 &&
+			encoded[4] == (std::numeric_limits<std::int32_t>::max)(),
+			"signed PCM32 encoding did not use the full integer range");
+
+		std::array<float, Samples.size()> decoded{};
+		NATIVE_REQUIRE(
+			DecodePcmSamples(
+				bytes, decoded,
+				MusicPlayerLibrary::AudioBitDepth::Bit32,
+				AV_SAMPLE_FMT_S32),
+			"signed PCM32 samples could not be decoded");
+		for (std::size_t index = 0; index < Samples.size(); ++index)
+		{
+			NATIVE_REQUIRE(
+				std::abs(decoded[index] - Samples[index]) <= 1.0e-6f,
+				"signed PCM32 conversion changed normalized sample amplitude");
+		}
+
+		std::array<std::uint8_t, Samples.size() * sizeof(float)> float_bytes{};
+		NATIVE_REQUIRE(
+			EncodePcmSamples(
+				Samples, float_bytes,
+				MusicPlayerLibrary::AudioBitDepth::Bit32,
+				AV_SAMPLE_FMT_FLT) &&
+			DecodePcmSamples(
+				float_bytes, decoded,
+				MusicPlayerLibrary::AudioBitDepth::Bit32,
+				AV_SAMPLE_FMT_FLT),
+			"the existing float32 conversion path regressed");
+	}
+
+    void TestLrcTimestampFractionNormalization()
+    {
+        using MusicPlayerLibrary::LrcTextParser::TryParseTimestamp;
+        struct TimestampCase
+        {
+            std::string_view text;
+            int expected_ms;
+        };
+        constexpr std::array Cases{
+            TimestampCase{"01:02", 62'000},
+            TimestampCase{"01:02.3", 62'300},
+            TimestampCase{"01:02.34", 62'340},
+            TimestampCase{"01:02.345", 62'345},
+            TimestampCase{"01:02.3456", 62'345},
+        };
+
+        for (const auto& test_case : Cases)
+        {
+            const auto parsed = TryParseTimestamp(test_case.text);
+            NATIVE_REQUIRE(parsed && *parsed == test_case.expected_ms,
+                "LRC timestamp fraction was not normalized to milliseconds");
+        }
+        NATIVE_REQUIRE(!TryParseTimestamp("01:02.34567"),
+            "LRC timestamp accepted more than four fractional digits");
+        NATIVE_REQUIRE(!TryParseTimestamp("01:02.trailing"),
+            "LRC timestamp accepted a non-numeric fractional component");
+    }
+
+    void TestLrcProgressDelimiterParsing()
+    {
+        using MusicPlayerLibrary::LrcTextParser::TryParseProgressLine;
+
+        const auto angle = TryParseProgressLine(
+            "A<00:00>B<00:00.1>C<00:00.25>D<00:00.375>E<00:00.5000>");
+        NATIVE_REQUIRE(angle && angle->plain_text == "ABCDE" &&
+                angle->segments.size() == 5 &&
+                angle->segments[0].end_time_ms == 0 &&
+                angle->segments[1].end_time_ms == 100 &&
+                angle->segments[2].end_time_ms == 250 &&
+                angle->segments[3].end_time_ms == 375 &&
+                angle->segments[4].end_time_ms == 500,
+            "angle-bracket progress nodes were parsed inconsistently");
+
+        const auto square = TryParseProgressLine("你[00:00.250]好[00:00.500]");
+        NATIVE_REQUIRE(square && square->plain_text == "你好" &&
+                square->segments.size() == 2,
+            "square-bracket progress nodes were not parsed");
+        NATIVE_REQUIRE(!TryParseProgressLine("A<00:00.250]"),
+            "angle progress node accepted a mismatched closing bracket");
+        NATIVE_REQUIRE(!TryParseProgressLine("A[00:00.250>"),
+            "square progress node accepted a mismatched closing bracket");
+    }
+
+    void TestLrcProgressMultiLinePlainTextAndControllerSelection()
+    {
+        const std::vector<std::string> lines{
+            "plain translation",
+            "A<00:00.100>B<00:00.200>",
+            "X[00:00.300]",
+        };
+        const auto parsed = MusicPlayerLibrary::LrcTextParser::ParseProgressLines(lines);
+        const std::vector<std::string> expected_plain_texts{
+            "plain translation", "AB", "X"
+        };
+        NATIVE_REQUIRE(parsed.plain_texts == expected_plain_texts,
+            "multi-line progress parsing did not retain all plain-text lines");
+        NATIVE_REQUIRE(parsed.controller_line &&
+                parsed.controller_line_index == 1 &&
+                parsed.controller_line->segments.size() == 2,
+            "multi-line progress parsing did not select the first richest controller line");
+    }
+
 #define NATIVE_TEST_CASE(suite, name, function) \
     TEST_CASE(name * doctest::test_suite(suite)) { function(); }
 
@@ -3090,6 +3449,17 @@ namespace
     NATIVE_TEST_CASE("audio pipeline", "shared device keeps sink EOS independent", TestAudioSinksShareDeviceButKeepEosStateIndependent)
     NATIVE_TEST_CASE("audio pipeline", "flat EQ skips FAPO and completes EOS", TestFAudioSinkSkipsFlatEqualizerAndCompletesEos)
     NATIVE_TEST_CASE("audio pipeline", "real FAudio sink drains tail before EOS", TestFAudioSinkDrainsTailThenCompletesActualEos)
+	NATIVE_TEST_CASE("wasapi clock", "normal 48 kHz rate", TestWasapiClockHealthAcceptsNormalRate)
+	NATIVE_TEST_CASE("wasapi clock", "short jitter is ignored", TestWasapiClockHealthIgnoresShortJitter)
+	NATIVE_TEST_CASE("wasapi clock", "normal 44.1 kHz rate", TestWasapiClockHealthSupports44100Hz)
+	NATIVE_TEST_CASE("wasapi clock", "two slow windows request recovery", TestWasapiClockHealthRequiresTwoSlowWindows)
+	NATIVE_TEST_CASE("wasapi clock", "reset clears slow history", TestWasapiClockHealthResetClearsSlowHistory)
+	NATIVE_TEST_CASE("wasapi format", "endpoint mix conversion", TestWasapiMixFormatConversion)
+	NATIVE_TEST_CASE("wasapi format", "explicit requests retain fallbacks and wire variants", TestWasapiExclusiveProbeFallbacksAndWireVariants)
+	NATIVE_TEST_CASE("wasapi format", "signed PCM32 conversion", TestPcm32IntegerConversion)
+    NATIVE_TEST_CASE("lrc parser", "timestamp fractions normalize", TestLrcTimestampFractionNormalization)
+    NATIVE_TEST_CASE("lrc parser", "progress delimiters parse", TestLrcProgressDelimiterParsing)
+    NATIVE_TEST_CASE("lrc parser", "multi-line plain text and controller selection", TestLrcProgressMultiLinePlainTextAndControllerSelection)
 
 #undef NATIVE_TEST_CASE
 #undef NATIVE_REQUIRE

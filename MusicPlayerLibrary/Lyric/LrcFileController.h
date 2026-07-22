@@ -3,31 +3,17 @@
 #pragma once
 
 #include <atomic>
+#include <string_view>
 
 #include "pch.h"
 #include "Core/FileAbstractionLayer.h"
+#include "Lyric/LrcTextParser.h"
 #include "Lyric/MLPipeline/VocabularyIO.h"
 #include "Lyric/MLPipeline/NCNNPipeline.h"
-
-using line_sample_type = std::vector<double>;
-using song_sample_type = std::vector<double>;
-
-constexpr int NUM_CLASSES = 8;
-constexpr int NUM_TYPES = 14;
 
 namespace MusicPlayerLibrary
 {
     
-enum class LrcMetadataTypeNative
-{
-	Artist, Album, Author, By, Offset, Title, Ignored, Error
-};
-
-enum class ThreeWayCompareResult
-{
-	Less = -1, Equal = 0, Greater = 1
-};
-
 enum class LrcAuxiliaryInfoNative
 {
 	Lyric,
@@ -62,27 +48,30 @@ public:
 		kr_zh_trans_roma
 	};
 	
+private:
 	std::unique_ptr<MLPipeline::NcnnClassifier> line_net_reasoning;
 	std::unique_ptr<MLPipeline::NcnnClassifier> song_net_reasoning;
 	MLPipeline::Vocabulary line_vocab_reasoning;
-	// MSTest运行在多线程上，避免并发测试导致神经网络被破坏
 	std::mutex dlib_mutex;
-private:
 	LrcLanguageHelper();
 	std::atomic<bool> accepting_inference{true};
 	void release_native_resources() noexcept;
+	int predict_locked(
+		MLPipeline::NcnnClassifier* classifier,
+		const std::vector<double>& features);
 public:
 	~LrcLanguageHelper();
 	LrcLanguageHelper& operator=(const LrcLanguageHelper&) = delete;
 	LrcLanguageHelper(const LrcLanguageHelper&) = delete;
 	LrcLanguageHelper(LrcLanguageHelper&&) = delete;
 	LrcLanguageHelper& operator=(LrcLanguageHelper&&) = delete;
-	std::string lyric_type_to_std_string(LanguageType type);
+	[[nodiscard]] static std::string_view LanguageTypeName(LanguageType type) noexcept;
+	[[nodiscard]] static int LanguageTypeModelIndex(LanguageType type) noexcept;
+	[[nodiscard]] static LanguageType LanguageTypeFromModelIndex(int index) noexcept;
+	[[nodiscard]] static LanguageClassification ClassificationFromModelIndex(int index) noexcept;
 	std::vector<double> extract_line_features(const std::string& text, const MLPipeline::Vocabulary& vocab);
 	
-	std::vector<float> to_float_features(const std::vector<double>& features);
-
-	song_sample_type extract_song_features(const std::vector<LrcLanguageHelper::LanguageType>& seq);
+	std::vector<double> extract_song_features(const std::vector<LrcLanguageHelper::LanguageType>& seq);
 	LanguageClassification detect_song_language_classification(const std::vector<LrcLanguageHelper::LanguageType>& lyric_lang_type);
 	auto detect_language_slot(
 		const std::vector<std::vector<LanguageType>>& lines) -> std::vector<LanguageType>;
@@ -149,23 +138,25 @@ public:
 */
 class LrcMultiNode : virtual public LrcAbstractNode {
 	friend class LrcFileController;
-	int str_count;
 	std::vector<std::string> lrc_texts;
 	std::vector<LrcAuxiliaryInfoNative> aux_infos;
 	std::vector<LrcLanguageHelper::LanguageType> lang_types;
 
-public:
+protected:
+	LrcMultiNode(
+			int t,
+			std::vector<std::string>&& texts,
+			LrcLanguageHelper::LanguageClassification classification,
+			std::vector<LrcLanguageHelper::LanguageType>&& recommend_slot);
 
-	LrcMultiNode(int t, const std::vector<std::string>& texts,
-		LrcLanguageHelper::LanguageClassification classification,
-		const std::vector<LrcLanguageHelper::LanguageType>& recommend_slot);
-
+	public:
 	[[nodiscard]] int get_lrc_str_count() const override {
-		return str_count;
+		return static_cast<int>(lrc_texts.size());
 	}
 
 	int get_lrc_str_at(int index, std::string& out_str) const override {
-		if (index < 0 || index >= str_count) return -1;
+		if (index < 0 || static_cast<std::size_t>(index) >= lrc_texts.size())
+			return -1;
 		out_str = lrc_texts[index];
 		return 0;
 	}
@@ -180,26 +171,29 @@ public:
 
 class LrcProgressNode: virtual public LrcAbstractNode
 {
+	friend class LrcFileController;
 protected:
-	int node_count;
 	struct node_info
 	{
 		int time_ms;
 		std::string node_text;
 	};
-	int end_time_ms;
 	std::vector<node_info> nodes;
 	int controller_line_index;
-public:
-	LrcProgressNode(int t, const std::string& text_with_node, int controller_line_index = 0);
+	LrcProgressNode(
+		int t,
+		const LrcTextParser::ProgressLine& parsed_line,
+		int controller_line_index);
+
+	public:
 	[[nodiscard]] int get_lrc_str_count() const override { return 1; }
 	int get_lrc_str_at(int index, std::string& out_str) const override
 	{
 		if (index != 0) return -1;
 		std::string text;
-		for (int i = 0; i < node_count; ++i)
+		for (const auto& node : nodes)
 		{
-			text.append(nodes[i].node_text);
+			text.append(node.node_text);
 		}
 		return out_str = text, 0;
 	}
@@ -217,18 +211,19 @@ public:
 		int& start_time_ms,
 		int& end_time_ms,
 		std::string& out_str) const override;
-	void set_lrc_end_timestamp(int time_ms) override { this->end_time_ms = time_ms; }
 	[[nodiscard]] bool is_progress_node() const override { return true; }
 };
 
 class LrcProgressMultiNode final:
 	public LrcProgressNode, public LrcMultiNode
 {
-public:
-	LrcProgressMultiNode(int t, const std::vector<std::string>& str_arr_2, 
+	friend class LrcFileController;
+	LrcProgressMultiNode(
+		int t,
+		LrcTextParser::ProgressLines parsed_lines,
 		LrcLanguageHelper::LanguageClassification classification,
 		std::vector<LrcLanguageHelper::LanguageType> recommend_slot);
-	
+	public:
 	[[nodiscard]] int get_lrc_str_count() const override
 	{
 		return LrcMultiNode::get_lrc_str_count();
@@ -241,45 +236,60 @@ public:
 	{
 		return LrcMultiNode::get_auxiliary_info(index);
 	}
-	
-	[[nodiscard]] LrcLanguageHelper::LanguageType get_language_type(int index) const override { return LrcMultiNode::get_language_type(index); }
-	[[nodiscard]] int get_intrinsic_end_time_ms() const override { return LrcProgressNode::get_intrinsic_end_time_ms(); }
-	[[nodiscard]] int get_controller_node_count(int line_index) const override { return LrcProgressNode::get_controller_node_count(line_index); }
-	[[nodiscard]] int get_controller_node_at(int line_index, int node_index, int& start_time_ms, int& end_time_ms, std::string& out_str) const override
+	[[nodiscard]] LrcLanguageHelper::LanguageType get_language_type(
+		int index) const override
 	{
-		return LrcProgressNode::get_controller_node_at(line_index, node_index, start_time_ms, end_time_ms, out_str);
+		return LrcMultiNode::get_language_type(index);
 	}
-	[[nodiscard]] bool is_progress_node() const override { return true; }
-	void set_lrc_end_timestamp(int time_ms) override { LrcProgressNode::set_lrc_end_timestamp(time_ms); }
+	[[nodiscard]] int get_intrinsic_end_time_ms() const override
+	{
+		return LrcProgressNode::get_intrinsic_end_time_ms();
+	}
+	[[nodiscard]] int get_controller_node_count(int line_index) const override
+	{
+		return LrcProgressNode::get_controller_node_count(line_index);
+	}
+	int get_controller_node_at(
+		int line_index,
+		int node_index,
+		int& start_time_ms,
+		int& end_time_ms,
+		std::string& out_str) const override
+	{
+		return LrcProgressNode::get_controller_node_at(
+			line_index, node_index, start_time_ms, end_time_ms, out_str);
+	}
+	[[nodiscard]] bool is_progress_node() const override
+	{
+		return LrcProgressNode::is_progress_node();
+	}
 };
 
-class LrcNodeFactory {
-public:
-	static LrcAbstractNode* CreateLrcNode(int time_ms, const std::vector<std::string>& lrc_texts, LrcLanguageHelper::LanguageClassification classification, std::vector<LrcLanguageHelper::LanguageType> recommend_slot);
+struct LrcMetadata
+{
+	std::string artist, album, author, by, title;
 };
 
 /*
 * internal helper of CLrcManagerWnd, perform lyric management
 */
 class LrcFileController {
-	std::vector<LrcAbstractNode*> lrc_nodes;
+	std::vector<std::unique_ptr<LrcAbstractNode>> lrc_nodes;
 	int lrc_offset_ms = 0;
 	int song_end_time_ms = 0;
 	std::string romanization_schema{};
-	struct
-	{
-		std::string artist, album, author, by, title;
-	} metadata;
+	LrcMetadata metadata;
+	static std::unique_ptr<LrcAbstractNode> CreateLrcNode(
+		int time_ms,
+		std::vector<std::string> lrc_texts,
+		LrcLanguageHelper::LanguageClassification classification,
+		std::vector<LrcLanguageHelper::LanguageType> recommend_slot);
 public:
 	explicit LrcFileController(int song_end_time_ms = 0);
-	~LrcFileController();
+	~LrcFileController() = default;
 	void parse_lrc_file_stream(IFile* file_stream);
 	void clear_lrc_nodes();
 	[[nodiscard]] std::string to_intermediate_json(bool pretty = false) const;
-
-	// static helpers
-	static LrcMetadataTypeNative get_metadata_type(const std::string& str);
-	static std::string get_metadata_value(const std::string& str);
 };
 
 	

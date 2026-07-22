@@ -15,7 +15,7 @@
 #endif
 
 #include "Audio/FFT/AudioPipelinePerformanceHelper.h"
-#include "Audio/Pipeline/Device/FAudioOutputDevice.h"
+#include "Audio/Pipeline/Device/AudioOutputDeviceLifecycle.h"
 #include "Core/NativeLibraryRuntime.h"
 #include "Core/NativeTraceRedirect.h"
 #include "Lyric/LrcFileController.h"
@@ -33,6 +33,29 @@ namespace
 	std::mutex runtime_mutex;
 	NativeRuntimeState runtime_state = NativeRuntimeState::NotInitialized;
 	bool language_helper_initialized = false;
+
+	void ShutdownLanguageHelper() noexcept
+	{
+		if (!language_helper_initialized)
+			return;
+		MusicPlayerLibrary::LrcLanguageHelper::ShutdownSingleton();
+		language_helper_initialized = false;
+	}
+
+	void ShutdownOutputAndTrace() noexcept
+	{
+		MusicPlayerLibrary::ShutdownAudioOutputDevices();
+		::NativeTraceRedirect::ShutdownNativeTraceRedirect();
+	}
+
+	void ShutdownInitializedResources(const bool announce_shutdown) noexcept
+	{
+		ShutdownLanguageHelper();
+		ncnn::destroy_gpu_instance();
+		if (announce_shutdown)
+			NATIVE_TRACE("info: native library runtime shut down");
+		ShutdownOutputAndTrace();
+	}
 }
 
 void MusicPlayerLibrary::NativeLibraryRuntime::Initialize()
@@ -55,14 +78,7 @@ void MusicPlayerLibrary::NativeLibraryRuntime::Initialize()
 	catch (...)
 	{
 		// 歌词解析器失败的时候，仍然需要清理底层的GPU资源
-		if (language_helper_initialized)
-		{
-			LrcLanguageHelper::ShutdownSingleton();
-			language_helper_initialized = false;
-		}
-		FAudioOutputDevice::ShutdownShared();
-		ncnn::destroy_gpu_instance();
-		NativeTraceRedirect::ShutdownNativeTraceRedirect();
+		ShutdownInitializedResources(false);
 		runtime_state = NativeRuntimeState::Shutdown;
 		throw;
 	}
@@ -80,19 +96,12 @@ void MusicPlayerLibrary::NativeLibraryRuntime::Shutdown() noexcept
 		NATIVE_TRACE("info: native library runtime shutting down");
 
 		// shutdown了以后拒绝任何歌词推理请求
-		if (language_helper_initialized)
-		{
-			LrcLanguageHelper::ShutdownSingleton();
-			language_helper_initialized = false;
-		}
-		ncnn::destroy_gpu_instance();
-
-		NATIVE_TRACE("info: native library runtime shut down");
+		ShutdownInitializedResources(true);
 	}
 
 	// 销毁ATLTRACE 重定向器
-	FAudioOutputDevice::ShutdownShared();
-	NativeTraceRedirect::ShutdownNativeTraceRedirect();
+	if (runtime_state != NativeRuntimeState::ShuttingDown)
+		ShutdownOutputAndTrace();
 	runtime_state = NativeRuntimeState::Shutdown;
 }
 

@@ -68,7 +68,7 @@ namespace MusicPlayerLibrary
         System::GC::SuppressFinalize(this);
     }
 
-    void LrcFileControllerManaged::!LrcFileControllerManaged()
+    LrcFileControllerManaged::!LrcFileControllerManaged()
     {
         if (native_handle)
             delete native_handle;

@@ -2,14 +2,14 @@
 
 #include "pch.h"
 
+#include <algorithm>
 #include <cmath>
-#include <cwctype>
 #include <format>
+#include <limits>
 #include <memory>
 #include <numeric>
 #include <stdexcept>
 #include <string_view>
-#include <algorithm>
 
 #if defined(__cplusplus)
 extern "C" {
@@ -22,11 +22,16 @@ extern "C" {
 #endif
 
 #include "Crypto/NcmDecryptor.h"
+#include "Crypto/NcmFormat.h"
+#include "Audio/FFmpeg/FFmpegError.h"
 #include "Audio/Pipeline/Source/AudioFile.h"
-#include "Audio/Pipeline/Sink/FAudioSink.h"
 #include "Audio/Pipeline/Observer/FFTAudioObserve.h"
+#include "Audio/Pipeline/Sink/AudioSinkFactory.h"
 #include "Core/LocaleConverter.h"
 #include "Core/AudioThreadScheduleHelper.h"
+#include "Core/ChronoUtilities.h"
+#include "Core/FileIO.h"
+#include "Core/StringUtilities.h"
 
 #if !defined(FFMPEG_CRITICAL_ERROR)
 #define FFMPEG_CRITICAL_ERROR(err_code) \
@@ -37,97 +42,15 @@ dialog_ffmpeg_critical_error(err_code, __FILE__, __LINE__); \
 
 namespace
 {
-	bool EqualsIgnoreCase(std::wstring_view left, std::wstring_view right)
-	{
-		if (left.size() != right.size())
-			return false;
-
-		for (size_t i = 0; i < left.size(); ++i)
-		{
-			if (std::towlower(left[i]) != std::towlower(right[i]))
-				return false;
-		}
-		return true;
-	}
-
-	void ToLowerInPlace(std::wstring& value)
-	{
-		for (wchar_t& ch : value)
-			ch = static_cast<wchar_t>(std::towlower(ch));
-	}
-
-	auto ToLower(const std::wstring& value) -> std::wstring
-	{
-		std::wstring result{value};
-		ToLowerInPlace(result);
-		return result;
-	}
-
-	struct AVFrameDeleter
-	{
-		void operator()(AVFrame* frame) const noexcept
-		{
-			if (frame)
-				av_frame_free(&frame);
-		}
-	};
-
-	using UniqueAVFrame = std::unique_ptr<AVFrame, AVFrameDeleter>;
-
-	struct AVSamplesBuffer
-	{
-		uint8_t** data = nullptr;
-
-		AVSamplesBuffer() = default;
-		AVSamplesBuffer(const AVSamplesBuffer&) = delete;
-		AVSamplesBuffer& operator=(const AVSamplesBuffer&) = delete;
-
-		~AVSamplesBuffer()
-		{
-			reset();
-		}
-
-		int allocate(int channels, int nb_samples, AVSampleFormat sample_fmt)
-		{
-			reset();
-			data = reinterpret_cast<uint8_t**>(av_calloc(channels, sizeof(uint8_t*)));
-			if (!data)
-				return AVERROR(ENOMEM);
-
-			if (const int ret = av_samples_alloc(data, nullptr, channels, nb_samples, sample_fmt, 0); ret < 0)
-			{
-				reset();
-				return ret;
-			}
-			return 0;
-		}
-
-		uint8_t** get() const noexcept
-		{
-			return data;
-		}
-
-		uint8_t* first_plane() const noexcept
-		{
-			return data ? data[0] : nullptr;
-		}
-
-		void reset() noexcept
-		{
-			if (data)
-			{
-				av_freep(&data[0]);
-				av_free(data);
-				data = nullptr;
-			}
-		}
-	};
-
 	constexpr auto PipelineBufferGrowthCooldown = std::chrono::seconds(2);
+	constexpr auto AudioWorkerPollInterval = std::chrono::milliseconds(2);
+	constexpr auto PlaybackPollInterval = std::chrono::milliseconds(1);
 
 	int SamplesForMilliseconds(const int sample_rate, const int milliseconds) noexcept
 	{
-		const int valid_sample_rate = sample_rate > 0 ? sample_rate : 48'000;
+		const int valid_sample_rate = sample_rate > 0
+			? sample_rate
+			: MusicPlayerLibrary::StandardAudioSampleRate;
 		return static_cast<int>(
 			static_cast<std::int64_t>(valid_sample_rate) * milliseconds / 1'000);
 	}
@@ -227,7 +150,6 @@ namespace
 		}
 		return 0.0;
 	}
-
 }
 
 int MusicPlayerLibrary::AudioFile::read_func(uint8_t* buf, int buf_size) {
@@ -290,28 +212,27 @@ inline int MusicPlayerLibrary::AudioFile::load_audio_context(const std::wstring&
 		NATIVE_TRACE("err: file not exists!\n");
 		return -1;
 	}
-	char magic[10] = {};
-	if (const int ret = file_stream->Read(magic, 8); ret != 8)
+	std::array<char, NcmMagicHeader.size() + 1> magic{};
+	if (!ReadExact(*file_stream, magic.data(), NcmMagicHeader.size()))
 	{
 		NATIVE_TRACE("err: failed to read magic bytes\n");
 		file_stream.reset();
 		return -1;
 	}
-	magic[9] = '\0';
-	NATIVE_TRACE("info: magic bytes: %s\n", magic);
-	if (std::string_view(magic, 8) == "CTENFDAM")
+	NATIVE_TRACE("info: magic bytes: %s\n", magic.data());
+	if (IsNcmMagicHeader(magic))
 	{
 		NATIVE_TRACE("info: found ncm header\n");
 		is_ncm = true;
 	}
 	file_stream->SeekToBegin();
 
-	if (EqualsIgnoreCase(file_extension_in, L"ncm") || is_ncm)
+	if (EqualsAsciiIgnoreCase<wchar_t>(file_extension_in, L"ncm") || is_ncm)
 	{
 		try
 		{
 			file_stream->SeekToBegin();
-			auto decryptor_result = NcmDecryptor::Open(std::move(file_stream), audio_filename);
+			auto decryptor_result = NcmDecryptor::Open(std::move(file_stream));
 			file_stream = std::move(decryptor_result.audio_file);
 			file_stream->SeekToBegin();
 			if (!skip_album_art_loading)
@@ -339,14 +260,10 @@ int MusicPlayerLibrary::AudioFile::load_audio_context_from_file_stream()
 
 	// 重置文件流指针，防止读取后未复位
 	file_stream->SeekToBegin();
-	std::unique_ptr<char[]> buf(DBG_NEW char[1024]);
-	memset(buf.get(), 0, sizeof(char) * 1024);
 	auto fail_load = [this]() {
-		close_audio_session();
-		reset_audio_normalization_filter();
-		release_audio_context();
+		release_audio_session_resources();
 		return -1;
-		};
+	};
 
 	// 取得文件大小
 	format_context = avformat_alloc_context();
@@ -388,14 +305,15 @@ int MusicPlayerLibrary::AudioFile::load_audio_context_from_file_stream()
 		nullptr  // no parateter specified
 	);
 	if (res < 0) {
-		av_strerror(res, buf.get(), 1024);
-		NATIVE_TRACE("err: avformat_open_input failed: %s\n", buf.get());
+		const auto reason = GetFFmpegErrorMessage(res);
+		NATIVE_TRACE("err: avformat_open_input failed: %s\n", reason.c_str());
 		return fail_load();
 	}
 	if (!format_context)
 	{
-		av_strerror(res, buf.get(), 1024);
-		NATIVE_TRACE("err: avformat_open_input failed, reason = %s(%d)\n", buf.get(), res);
+		const auto reason = GetFFmpegErrorMessage(res);
+		NATIVE_TRACE("err: avformat_open_input failed, reason = %s(%d)\n",
+			reason.c_str(), res);
 		return fail_load();
 	}
 
@@ -479,8 +397,8 @@ int MusicPlayerLibrary::AudioFile::load_audio_context_from_file_stream()
 	res = avcodec_open2(codec_context, codec, nullptr);
 	if (res)
 	{
-		av_strerror(res, buf.get(), 1024);
-		NATIVE_TRACE("err: avcodec_open2 failed, reason = %s\n", buf.get());
+		const auto reason = GetFFmpegErrorMessage(res);
+		NATIVE_TRACE("err: avcodec_open2 failed, reason = %s\n", reason.c_str());
 		return fail_load();
 	}
 
@@ -525,7 +443,7 @@ int MusicPlayerLibrary::AudioFile::load_audio_context_from_file_stream()
 	is_audio_file_and_sink_bit_perfect.store(
 		bit_perfect_handshake, std::memory_order_release);
 	NATIVE_TRACE(
-		"info: source/sink bit-perfect handshake: %s\n",
+		"info: source/sink exact-format handshake: %s\n",
 		bit_perfect_handshake ? "accepted" : "normalization required");
 
 	// avoid ffmpeg warning
@@ -536,7 +454,6 @@ int MusicPlayerLibrary::AudioFile::load_audio_context_from_file_stream()
 	// Initialize the FIFO with the normalized format submitted to the sink.
 	fifo_audio_channels = audio_output_format.channel_count;
 	fifo_audio_sample_fmt = audio_output_format.sample_format;
-	fifo_sample_rate = audio_output_format.sample_rate;
 	reset_audio_pipeline_buffering();
 	if (!audio_fifo) {
 		res = initialize_audio_fifo(fifo_audio_sample_fmt,
@@ -549,8 +466,9 @@ int MusicPlayerLibrary::AudioFile::load_audio_context_from_file_stream()
 	}
 
 	// init decoder
-	frame = av_frame_alloc();
-	normalized_frame = bit_perfect_handshake ? nullptr : av_frame_alloc();
+	frame.reset(av_frame_alloc());
+	normalized_frame.reset(
+		bit_perfect_handshake ? nullptr : av_frame_alloc());
 	packet = av_packet_alloc();
 	if (!frame || (!bit_perfect_handshake && !normalized_frame) || !packet)
 	{
@@ -561,8 +479,7 @@ int MusicPlayerLibrary::AudioFile::load_audio_context_from_file_stream()
 	reset_audio_normalization_filter();
 	if (!bit_perfect_handshake && init_audio_normalization_filter() < 0)
 	{
-		close_audio_session();
-		release_audio_context();
+		release_audio_session_resources();
 		return -1;
 	}
 
@@ -725,17 +642,25 @@ void MusicPlayerLibrary::AudioFile::read_metadata()
 	auto read_metadata_iter = [&](const AVDictionaryEntry* tag) {
 		std::wstring key = convert_utf8(tag->key);
 		std::wstring value = convert_utf8(tag->value);
-		if (EqualsIgnoreCase(key, L"title") && song_title.empty()) {
+		if (EqualsAsciiIgnoreCase<wchar_t>(key, L"title") && song_title.empty()) {
 			song_title = value;
 			NATIVE_TRACE(L"info: song title: %s\n", song_title.c_str());
 		}
-		else if (EqualsIgnoreCase(key, L"artist") && song_artist.empty()) {
+		else if (EqualsAsciiIgnoreCase<wchar_t>(key, L"artist") && song_artist.empty()) {
 			song_artist = value;
 			NATIVE_TRACE(L"info: song artist: %s\n", song_artist.c_str());
 		}
 		else
 		{
-			if (const auto lower = ToLower(key); lower.find(L"lyric") != std::wstring::npos)
+			auto lower = key;
+			std::ranges::transform(
+				lower,
+				lower.begin(),
+				[](const wchar_t value)
+				{
+					return ToLowerAscii(value);
+				});
+			if (lower.find(L"lyric") != std::wstring::npos)
 			{
 				this->id3_string_lyric = value;
 				NATIVE_TRACE("info: song contains lyric in metadata\n");
@@ -840,6 +765,24 @@ int MusicPlayerLibrary::AudioFile::get_audio_fifo_high_watermark()
 	return audio_fifo_high_watermark_samples.load();
 }
 
+bool MusicPlayerLibrary::AudioFile::wait_for_audio_fifo_room()
+{
+	while (playback_state.load() != audio_playback_state_stopped &&
+		!user_request_stop.load())
+	{
+		{
+			std::lock_guard fifo_lock(audio_fifo_mutex);
+			if (get_audio_fifo_cached_samples_size() <
+				get_audio_fifo_high_watermark())
+			{
+				return true;
+			}
+		}
+		wait_frame_underrun(AudioWorkerPollInterval);
+	}
+	return false;
+}
+
 int MusicPlayerLibrary::AudioFile::get_decoded_frame_queue_high_watermark()
 {
 	return decoded_frame_queue_high_watermark_samples.load();
@@ -862,8 +805,7 @@ void MusicPlayerLibrary::AudioFile::reset_audio_pipeline_buffering()
 	const auto allow_immediate_growth_at =
 		std::chrono::steady_clock::now() - PipelineBufferGrowthCooldown;
 	last_pipeline_buffer_growth_ns.store(
-		std::chrono::duration_cast<std::chrono::nanoseconds>(
-			allow_immediate_growth_at.time_since_epoch()).count());
+		SteadyClockNanoseconds(allow_immediate_growth_at));
 
 	NATIVE_TRACE(
 		"info: audio pipeline initial buffering: fft=%.2f us, fifo=%d samples (%d ms), decoded queue=%d samples (%d ms)\n",
@@ -882,7 +824,9 @@ void MusicPlayerLibrary::AudioFile::observe_audio_pipeline_stage_duration(
 {
 	const int valid_sample_rate = processed_sample_rate > 0
 		? processed_sample_rate
-		: (audio_output_format.sample_rate > 0 ? audio_output_format.sample_rate : 48000);
+		: (audio_output_format.sample_rate > 0
+			? audio_output_format.sample_rate
+			: StandardAudioSampleRate);
 	const double audio_duration_milliseconds = processed_samples > 0
 		? static_cast<double>(processed_samples) * 1000.0 / valid_sample_rate
 		: static_cast<double>(sink_submit_frame_size) * 1000.0 / valid_sample_rate;
@@ -914,15 +858,30 @@ void MusicPlayerLibrary::AudioFile::observe_audio_pipeline_stage_duration(
 		slow_threshold_milliseconds);
 }
 
+void MusicPlayerLibrary::AudioFile::observe_and_reset_decoder_pending_work(
+	const int processed_samples,
+	const int processed_sample_rate)
+{
+	const int effective_sample_rate = processed_sample_rate > 0
+		? processed_sample_rate
+		: (codec_context
+			? codec_context->sample_rate
+			: audio_output_format.sample_rate);
+	observe_audio_pipeline_stage_duration(
+		audio_pipeline_stage::decoder,
+		decoder_pending_work_milliseconds,
+		processed_samples,
+		effective_sample_rate);
+	decoder_pending_work_milliseconds = 0.0;
+}
+
 void MusicPlayerLibrary::AudioFile::grow_audio_pipeline_buffers(
 	const char* slow_stage,
 	const double elapsed_milliseconds,
 	const double slow_threshold_milliseconds)
 {
 	std::lock_guard buffering_lock(audio_pipeline_buffering_mutex);
-	const auto now = std::chrono::steady_clock::now();
-	const std::int64_t now_ns = std::chrono::duration_cast<std::chrono::nanoseconds>(
-		now.time_since_epoch()).count();
+	const std::int64_t now_ns = SteadyClockNowNanoseconds();
 	const std::int64_t cooldown_ns = std::chrono::duration_cast<std::chrono::nanoseconds>(
 		PipelineBufferGrowthCooldown).count();
 	if (now_ns - last_pipeline_buffer_growth_ns.load() < cooldown_ns)
@@ -930,7 +889,7 @@ void MusicPlayerLibrary::AudioFile::grow_audio_pipeline_buffers(
 
 	const int valid_sample_rate = audio_output_format.sample_rate > 0
 		? audio_output_format.sample_rate
-		: 48000;
+		: StandardAudioSampleRate;
 	const int old_fifo_target = audio_fifo_high_watermark_samples.load();
 	const int old_queue_target = decoded_frame_queue_high_watermark_samples.load();
 	const int max_fifo_target = SamplesForMilliseconds(valid_sample_rate, 750);
@@ -987,7 +946,7 @@ bool MusicPlayerLibrary::AudioFile::queue_decoded_frame(AVFrame* decoded_frame)
 	if (!decoded_frame)
 		return false;
 
-	UniqueAVFrame queued_frame(av_frame_alloc());
+	UniqueAvFrame queued_frame(av_frame_alloc());
 	if (!queued_frame)
 	{
 		FFMPEG_CRITICAL_ERROR(AVERROR(ENOMEM));
@@ -1001,7 +960,7 @@ bool MusicPlayerLibrary::AudioFile::queue_decoded_frame(AVFrame* decoded_frame)
 		&& playback_state.load() != audio_playback_state_stopped
 		&& decoded_frame_queue_samples >= get_decoded_frame_queue_high_watermark())
 	{
-		decoded_frame_queue_cv.wait_for(lock, std::chrono::milliseconds(2));
+		decoded_frame_queue_cv.wait_for(lock, AudioWorkerPollInterval);
 	}
 
 	if (decoded_frame_queue_abort || playback_state.load() == audio_playback_state_stopped)
@@ -1009,15 +968,15 @@ bool MusicPlayerLibrary::AudioFile::queue_decoded_frame(AVFrame* decoded_frame)
 		return false;
 	}
 
-	decoded_frame_queue.push_back(queued_frame.get());
-	queued_frame.release();
+	decoded_frame_queue.push_back(std::move(queued_frame));
 	decoded_frame_queue_samples += frame_samples;
 	lock.unlock();
 	decoded_frame_queue_cv.notify_all();
 	return true;
 }
 
-AVFrame* MusicPlayerLibrary::AudioFile::pop_decoded_frame()
+MusicPlayerLibrary::UniqueAvFrame
+MusicPlayerLibrary::AudioFile::pop_decoded_frame()
 {
 	std::unique_lock lock(decoded_frame_queue_mutex);
 	decoded_frame_queue_cv.wait(lock, [this]
@@ -1029,11 +988,11 @@ AVFrame* MusicPlayerLibrary::AudioFile::pop_decoded_frame()
 		});
 
 	if (decoded_frame_queue_abort || playback_state.load() == audio_playback_state_stopped)
-		return nullptr;
+		return {};
 	if (decoded_frame_queue.empty())
-		return nullptr;
+		return {};
 
-	AVFrame* frame = decoded_frame_queue.front();
+	UniqueAvFrame frame = std::move(decoded_frame_queue.front());
 	decoded_frame_queue.pop_front();
 	decoded_frame_queue_samples -= frame ? frame->nb_samples : 0;
 	if (decoded_frame_queue_samples < 0)
@@ -1052,13 +1011,26 @@ void MusicPlayerLibrary::AudioFile::signal_decoded_frame_queue_eof()
 	decoded_frame_queue_cv.notify_all();
 }
 
+void MusicPlayerLibrary::AudioFile::release_audio_session_resources()
+{
+	close_audio_session();
+	reset_audio_normalization_filter();
+	release_audio_context();
+}
+
+void MusicPlayerLibrary::AudioFile::abort_decoded_frame_queue_waiters()
+{
+	{
+		std::lock_guard lock(decoded_frame_queue_mutex);
+		decoded_frame_queue_abort = true;
+	}
+	decoded_frame_queue_cv.notify_all();
+	notify_all_frame_notifications();
+}
+
 void MusicPlayerLibrary::AudioFile::reset_decoded_frame_queue(bool abort_waiters)
 {
 	std::lock_guard lock(decoded_frame_queue_mutex);
-	for (AVFrame*& queued_frame : decoded_frame_queue)
-	{
-		av_frame_free(&queued_frame);
-	}
 	decoded_frame_queue.clear();
 	decoded_frame_queue_samples = 0;
 	decoded_frame_queue_eof = false;
@@ -1071,9 +1043,6 @@ inline int MusicPlayerLibrary::AudioFile::initialize_audio_session()
 	if (!codec_context || !audio_sink_ || !audio_sink_->IsInitialized())
 		return -1;
 	audio_output_format = audio_sink_->GetOutputFormat();
-	const FAudioWaveFormatEx& wfx = audio_output_format.wave_format.Format;
-	last_frametime = 0.0;
-	standard_frametime = sink_submit_frame_size * 1.0 / wfx.nSamplesPerSec * 1000; // in ms
 	playback_state.store(audio_playback_state_init);
 	return 0;
 }
@@ -1122,6 +1091,30 @@ void MusicPlayerLibrary::AudioFile::notify_observers_pcm(
 			observe->OnPcm(block);
 }
 
+void MusicPlayerLibrary::AudioFile::notify_observers_pcm_frame(
+	const AVFrame& frame)
+{
+	const auto frame_count = static_cast<std::uint32_t>(frame.nb_samples);
+	const auto byte_count = static_cast<std::size_t>(frame_count) *
+		audio_output_format.wave_format.Format.nBlockAlign;
+	const auto stream_frame_offset = normalized_stream_frames_.fetch_add(
+		frame_count, std::memory_order_acq_rel);
+	const double stream_origin = stream_origin_seconds_.load(
+		std::memory_order_acquire);
+	const NormalizedPcmBlock observed_block{
+		.bytes = std::span<const std::uint8_t>(
+			frame.extended_data[0], byte_count),
+		.frame_count = frame_count,
+		.pts_seconds = stream_origin +
+			static_cast<double>(stream_frame_offset) /
+				audio_output_format.sample_rate,
+		.stream_frame_offset = stream_frame_offset,
+		.generation = audio_stream_generation_.load(),
+		.end_of_stream = false
+	};
+	notify_observers_pcm(observed_block);
+}
+
 void MusicPlayerLibrary::AudioFile::notify_observers_end_of_stream(
 	const AudioStreamGeneration generation)
 {
@@ -1146,20 +1139,36 @@ inline void MusicPlayerLibrary::AudioFile::close_audio_session()
 	reset_decoded_frame_queue(true);
 	if (audio_sink_)
 		audio_sink_->AbortStream();
-	if (frame) {
-		av_frame_free(&frame);
-		frame = nullptr;
-	}
-	if (normalized_frame)
-	{
-		av_frame_free(&normalized_frame);
-		normalized_frame = nullptr;
-	}
+	frame.reset();
+	normalized_frame.reset();
 	if (packet) {
 		av_packet_free(&packet);
 		packet = nullptr;
 	}
 	notify_observers_reset(audio_stream_generation_.load());
+}
+
+void MusicPlayerLibrary::AudioFile::start_audio_output_sink()
+{
+	if (!audio_sink_ || !audio_sink_->Start())
+		throw std::runtime_error("failed to start the audio output sink");
+	playback_state.store(audio_playback_state_playing);
+	publish_message({PlayerMessageType::Started});
+}
+
+double MusicPlayerLibrary::AudioFile::update_elapsed_time(
+	const AudioSinkState& state) noexcept
+{
+	const auto sample_rate = audio_output_format.wave_format.Format.nSamplesPerSec;
+	double current = pts_seconds.load();
+	if (sample_rate > 0)
+	{
+		current += static_cast<double>(state.samples_played) / sample_rate;
+	}
+	if (const double duration = length.load(); duration > 0.0)
+		current = std::min(current, duration);
+	elapsed_time.store(current);
+	return current;
 }
 
 void MusicPlayerLibrary::AudioFile::audio_playback_worker_thread()
@@ -1168,10 +1177,21 @@ void MusicPlayerLibrary::AudioFile::audio_playback_worker_thread()
 	AudioSinkState state{};
 	bool eos_submitted = false;
 	std::uint64_t submitted_stream_frames = 0;
+	const bool use_frame_based_backpressure =
+		audio_sink_ && audio_sink_->IsExclusiveModeEnabled();
+	const auto queue_high_watermark_frames = (std::max)(
+		static_cast<std::uint64_t>(sink_submit_frame_size) * 2,
+		static_cast<std::uint64_t>(wfx.nSamplesPerSec) / 10);
+	const auto queue_low_watermark_frames = (std::max)(
+		static_cast<std::uint64_t>(sink_submit_frame_size),
+		queue_high_watermark_frames / 2);
+	const auto start_prefill_frames = use_frame_based_backpressure
+		? queue_high_watermark_frames
+		: static_cast<std::uint64_t>(sink_submit_frame_size);
 
 	while (true)
 	{
-		if (!wait_frame_ready(std::chrono::milliseconds(1)))
+		if (!wait_frame_ready(PlaybackPollInterval))
 		{
 			const int cached_sample_size = get_audio_fifo_cached_samples_size();
 			if (playback_state.load() == audio_playback_state_stopped)
@@ -1198,7 +1218,7 @@ void MusicPlayerLibrary::AudioFile::audio_playback_worker_thread()
 		int fifo_size = get_audio_fifo_cached_samples_size();
 		if (fifo_size < 0 && is_audio_pipeline_running())
 		{
-			std::this_thread::sleep_for(std::chrono::milliseconds(1));
+			std::this_thread::sleep_for(PlaybackPollInterval);
 			continue;
 		}
 
@@ -1216,17 +1236,16 @@ void MusicPlayerLibrary::AudioFile::audio_playback_worker_thread()
 			if (!state.stream_ended)
 			{
 				if (audio_sink_)
-					(void)audio_sink_->WaitForStreamEnd(std::chrono::milliseconds(1));
+					(void)audio_sink_->WaitForStreamEnd(PlaybackPollInterval);
 				state = audio_sink_ ? audio_sink_->GetState() : AudioSinkState{};
 				if (state.error_code != 0)
 					throw std::runtime_error("audio output sink failed while draining EOS");
 				if (state.samples_played > 0)
 				{
-					elapsed_time = static_cast<double>(state.samples_played) /
-						wfx.nSamplesPerSec + pts_seconds.load();
-					if (const double duration = length.load(); duration > 0.0)
-						elapsed_time = std::min(elapsed_time.load(), duration);
-					publish_message({PlayerMessageType::TimeChanged, elapsed_time.load()});
+					publish_message({
+						PlayerMessageType::TimeChanged,
+						update_elapsed_time(state)
+					});
 				}
 				continue;
 			}
@@ -1256,10 +1275,7 @@ void MusicPlayerLibrary::AudioFile::audio_playback_worker_thread()
 				eos_submitted = true;
 				if (playback_state.load() == audio_playback_state_init)
 				{
-					if (!audio_sink_->Start())
-						throw std::runtime_error("failed to start the audio output sink");
-					playback_state.store(audio_playback_state_playing);
-					publish_message({PlayerMessageType::Started});
+					start_audio_output_sink();
 				}
 			}
 			NATIVE_TRACE("info: normalized source drained; waiting for sink EOS\n");
@@ -1267,7 +1283,7 @@ void MusicPlayerLibrary::AudioFile::audio_playback_worker_thread()
 			continue;
 		}
 
-		AVSamplesBuffer fifo_buffer;
+		AvSamplesBuffer fifo_buffer;
 		int read_samples = 0;
 		bool is_final_block = false;
 		{
@@ -1286,7 +1302,7 @@ void MusicPlayerLibrary::AudioFile::audio_playback_worker_thread()
 			}
 
 			const int fifo_read_size = std::min(sink_submit_frame_size, fifo_size);
-			if (const int allocation_result = fifo_buffer.allocate(
+			if (const int allocation_result = fifo_buffer.Allocate(
 				fifo_audio_channels, fifo_read_size, fifo_audio_sample_fmt);
 				allocation_result < 0)
 			{
@@ -1294,7 +1310,7 @@ void MusicPlayerLibrary::AudioFile::audio_playback_worker_thread()
 				FFMPEG_CRITICAL_ERROR(allocation_result);
 				break;
 			}
-			read_samples = read_samples_from_fifo(fifo_buffer.get(), fifo_read_size);
+			read_samples = read_samples_from_fifo(fifo_buffer.Get(), fifo_read_size);
 			if (read_samples < 0)
 			{
 				NATIVE_TRACE("err: read normalized samples from FIFO failed, code=%d\n",
@@ -1311,13 +1327,16 @@ void MusicPlayerLibrary::AudioFile::audio_playback_worker_thread()
 
 		if (read_samples == 0)
 		{
-			std::this_thread::sleep_for(std::chrono::milliseconds(1));
+			std::this_thread::sleep_for(PlaybackPollInterval);
 			continue;
 		}
 
-		while (state.buffers_queued >= 32 && !user_request_stop.load())
+		while ((use_frame_based_backpressure
+			? state.queued_frames >= queue_high_watermark_frames
+			: state.buffers_queued >= 32) &&
+			!user_request_stop.load())
 		{
-			std::this_thread::sleep_for(std::chrono::milliseconds(1));
+			std::this_thread::sleep_for(PlaybackPollInterval);
 			state = audio_sink_ ? audio_sink_->GetState() : AudioSinkState{};
 			if (state.error_code != 0)
 				throw std::runtime_error(
@@ -1326,13 +1345,19 @@ void MusicPlayerLibrary::AudioFile::audio_playback_worker_thread()
 		if (user_request_stop.load())
 			break;
 
-		const auto audio_bytes = static_cast<std::uint32_t>(
-			read_samples * wfx.nBlockAlign);
+		const auto audio_byte_count = static_cast<std::uint64_t>(read_samples) *
+			wfx.nBlockAlign;
+		if (audio_byte_count >
+			(std::numeric_limits<std::uint32_t>::max)())
+		{
+			throw std::overflow_error("normalized PCM block is too large");
+		}
+		const auto audio_bytes = static_cast<std::uint32_t>(audio_byte_count);
 		const double stream_origin = stream_origin_seconds_.load(
 			std::memory_order_acquire);
 		const NormalizedPcmBlock pcm_block{
 			.bytes = std::span<const std::uint8_t>(
-				fifo_buffer.first_plane(), audio_bytes),
+				fifo_buffer.FirstPlane(), audio_bytes),
 			.frame_count = static_cast<std::uint32_t>(read_samples),
 			.pts_seconds = stream_origin +
 				static_cast<double>(submitted_stream_frames) / wfx.nSamplesPerSec,
@@ -1341,7 +1366,7 @@ void MusicPlayerLibrary::AudioFile::audio_playback_worker_thread()
 			.end_of_stream = is_final_block
 		};
 		const bool submitted = audio_sink_ && audio_sink_->Submit(pcm_block);
-		fifo_buffer.reset();
+		fifo_buffer.Reset();
 		if (!submitted)
 		{
 			NATIVE_TRACE("err: submit normalized PCM to audio sink failed\n");
@@ -1354,27 +1379,24 @@ void MusicPlayerLibrary::AudioFile::audio_playback_worker_thread()
 			eos_submitted = true;
 		}
 
-		if (playback_state.load() == audio_playback_state_init)
+		const bool prefill_ready = submitted_stream_frames >=
+			start_prefill_frames || is_final_block;
+		if (playback_state.load() == audio_playback_state_init && prefill_ready)
 		{
-			if (!audio_sink_->Start())
-				throw std::runtime_error("failed to start the audio output sink");
-			playback_state.store(audio_playback_state_playing);
-			publish_message({PlayerMessageType::Started});
-			std::this_thread::sleep_for(std::chrono::milliseconds(5));
+			start_audio_output_sink();
+			if (!use_frame_based_backpressure)
+				std::this_thread::sleep_for(std::chrono::milliseconds(5));
 		}
 
 		state = audio_sink_->GetState();
-		elapsed_time = static_cast<double>(state.samples_played) /
-			wfx.nSamplesPerSec + pts_seconds.load();
-		if (const double duration = length.load(); duration > 0.0)
-			elapsed_time = std::min(elapsed_time.load(), duration);
+		const double current_elapsed_time = update_elapsed_time(state);
 		const double submitted_time_ms =
 			static_cast<double>(read_samples) * 1000.0 / wfx.nSamplesPerSec;
 		if (message_interval_timer > message_interval ||
 			message_interval_timer < 0.0f)
 		{
 			message_interval_timer = 0.0f;
-			publish_message({PlayerMessageType::TimeChanged, elapsed_time.load()});
+			publish_message({PlayerMessageType::TimeChanged, current_elapsed_time});
 		}
 		else
 		{
@@ -1386,39 +1408,13 @@ void MusicPlayerLibrary::AudioFile::audio_playback_worker_thread()
 		{
 			notify_frame_underrun();
 		}
-		else if (state.buffers_queued < 16)
+		else if (use_frame_based_backpressure
+			? state.queued_frames < queue_low_watermark_frames
+			: state.buffers_queued < 16)
 		{
 			notify_frame_ready();
 		}
 	}
-}
-
-int MusicPlayerLibrary::AudioFile::timed_read_packet()
-{
-	const auto begin = std::chrono::steady_clock::now();
-	const int result = av_read_frame(format_context, packet);
-	decoder_pending_work_milliseconds += ElapsedMilliseconds(
-		std::chrono::steady_clock::now() - begin);
-	return result;
-}
-
-int MusicPlayerLibrary::AudioFile::timed_send_decoder_packet(
-	const AVPacket* input_packet)
-{
-	const auto begin = std::chrono::steady_clock::now();
-	const int result = avcodec_send_packet(codec_context, input_packet);
-	decoder_pending_work_milliseconds += ElapsedMilliseconds(
-		std::chrono::steady_clock::now() - begin);
-	return result;
-}
-
-int MusicPlayerLibrary::AudioFile::timed_receive_decoded_frame()
-{
-	const auto begin = std::chrono::steady_clock::now();
-	const int result = avcodec_receive_frame(codec_context, frame);
-	decoder_pending_work_milliseconds += ElapsedMilliseconds(
-		std::chrono::steady_clock::now() - begin);
-	return result;
 }
 
 void MusicPlayerLibrary::AudioFile::reset_audio_source_bitrate() noexcept
@@ -1452,6 +1448,14 @@ void MusicPlayerLibrary::AudioFile::audio_decode_worker_thread()
 	bool is_eof = false;
 	bool decoder_flushed = false;
 	decoder_pending_work_milliseconds = 0.0;
+	const auto timed_decoder_call = [this](auto&& operation)
+	{
+		const auto begin = std::chrono::steady_clock::now();
+		const int result = operation();
+		decoder_pending_work_milliseconds += ElapsedMilliseconds(
+			std::chrono::steady_clock::now() - begin);
+		return result;
+	};
 	while (true) {
 		if (playback_state.load() == audio_playback_state_stopped) {
 			NATIVE_TRACE("info: playback stopped, decoder thread exiting\n");
@@ -1462,7 +1466,7 @@ void MusicPlayerLibrary::AudioFile::audio_decode_worker_thread()
 			std::unique_lock queue_lock(decoded_frame_queue_mutex);
 			if (decoded_frame_queue_samples >= get_decoded_frame_queue_high_watermark())
 			{
-				decoded_frame_queue_cv.wait_for(queue_lock, std::chrono::milliseconds(2), [this]
+				decoded_frame_queue_cv.wait_for(queue_lock, AudioWorkerPollInterval, [this]
 					{
 						return decoded_frame_queue_abort
 							|| playback_state.load() == audio_playback_state_stopped
@@ -1494,7 +1498,8 @@ void MusicPlayerLibrary::AudioFile::audio_decode_worker_thread()
 
 		// 从输入文件中读取数据并解码
 		if (!is_eof) {
-			if (timed_read_packet() < 0) {
+			if (timed_decoder_call([this]
+				{ return av_read_frame(format_context, packet); }) < 0) {
 				NATIVE_TRACE("info: av_read_frame reached eof, entering flush mode\n");
 				// 文件流结束，进入flush模式
 				is_eof = true;
@@ -1510,7 +1515,8 @@ void MusicPlayerLibrary::AudioFile::audio_decode_worker_thread()
 
 		if (is_eof && !decoder_flushed) {
 			// 发送空包以排空解码器缓存
-			decoder_last_call_result = timed_send_decoder_packet(nullptr);
+			decoder_last_call_result = timed_decoder_call([this]
+				{ return avcodec_send_packet(codec_context, nullptr); });
 			if (decoder_last_call_result < 0 && decoder_last_call_result != AVERROR_EOF) {
 				NATIVE_TRACE("warn: flush decoder failed, code=%d\n", decoder_last_call_result);
 			}
@@ -1518,16 +1524,12 @@ void MusicPlayerLibrary::AudioFile::audio_decode_worker_thread()
 		}
 		else if (!is_eof) {
 			// 正常送入数据包
-			decoder_last_call_result = timed_send_decoder_packet(packet);
+			decoder_last_call_result = timed_decoder_call([this]
+				{ return avcodec_send_packet(codec_context, packet); });
 			if (decoder_last_call_result < 0) {
 				if (decoder_last_call_result == AVERROR_INVALIDDATA) {
 					// 忽略坏块
-					observe_audio_pipeline_stage_duration(
-						audio_pipeline_stage::decoder,
-						decoder_pending_work_milliseconds,
-						0,
-						codec_context ? codec_context->sample_rate : audio_output_format.sample_rate);
-					decoder_pending_work_milliseconds = 0.0;
+					observe_and_reset_decoder_pending_work(0, 0);
 					av_packet_unref(packet);
 					continue;
 				}
@@ -1540,41 +1542,31 @@ void MusicPlayerLibrary::AudioFile::audio_decode_worker_thread()
 		}
 		while (true)
 		{
-			decoder_last_call_result = timed_receive_decoded_frame();
+			decoder_last_call_result = timed_decoder_call([this]
+				{ return avcodec_receive_frame(codec_context, frame.get()); });
 			if (decoder_last_call_result == AVERROR(EAGAIN)) {
 				break; // 没有更多帧
 			}
 			if (decoder_last_call_result == AVERROR_EOF) {
-				observe_audio_pipeline_stage_duration(
-					audio_pipeline_stage::decoder,
-					decoder_pending_work_milliseconds,
-					0,
-					codec_context ? codec_context->sample_rate : audio_output_format.sample_rate);
-				decoder_pending_work_milliseconds = 0.0;
+				observe_and_reset_decoder_pending_work(0, 0);
 				NATIVE_TRACE("info: decoder flushed, signaling normalizer eof\n");
 				signal_decoded_frame_queue_eof();
-				av_frame_unref(frame);
+				av_frame_unref(frame.get());
 				if (!is_eof) {
 					av_packet_unref(packet);
 				}
 				return;
 			}
 			if (decoder_last_call_result < 0) {
-				av_frame_unref(frame);
+				av_frame_unref(frame.get());
 				playback_state.store(audio_playback_state_stopped);
 				FFMPEG_CRITICAL_ERROR(decoder_last_call_result);
 				break;
 			}
 			observe_audio_source_frame(*frame);
-			observe_audio_pipeline_stage_duration(
-				audio_pipeline_stage::decoder,
-				decoder_pending_work_milliseconds,
-				frame->nb_samples,
-				frame->sample_rate > 0
-					? frame->sample_rate
-					: (codec_context ? codec_context->sample_rate : audio_output_format.sample_rate));
-			decoder_pending_work_milliseconds = 0.0;
-			if (!queue_decoded_frame(frame))
+			observe_and_reset_decoder_pending_work(
+				frame->nb_samples, frame->sample_rate);
+			if (!queue_decoded_frame(frame.get()))
 			{
 				if (playback_state.load() != audio_playback_state_stopped)
 				{
@@ -1584,7 +1576,7 @@ void MusicPlayerLibrary::AudioFile::audio_decode_worker_thread()
 				break;
 			}
 		}
-		av_frame_unref(frame); // eof, err process -> proper unref
+		av_frame_unref(frame.get()); // eof, err process -> proper unref
 		if (!is_eof) {
 			// EOF模式时，发送的包是空包
 			av_packet_unref(packet);
@@ -1600,25 +1592,12 @@ void MusicPlayerLibrary::AudioFile::audio_bit_perfect_worker_thread()
 	while (playback_state.load() != audio_playback_state_stopped &&
 		!user_request_stop.load())
 	{
-		while (playback_state.load() != audio_playback_state_stopped &&
-			!user_request_stop.load())
-		{
-			int fifo_size;
-			{
-				std::lock_guard fifo_lock(audio_fifo_mutex);
-				fifo_size = get_audio_fifo_cached_samples_size();
-			}
-			if (fifo_size < get_audio_fifo_high_watermark())
-				break;
-			wait_frame_underrun(std::chrono::milliseconds(2));
-		}
-		if (playback_state.load() == audio_playback_state_stopped ||
-			user_request_stop.load())
+		if (!wait_for_audio_fifo_room())
 		{
 			break;
 		}
 
-		UniqueAVFrame decoded_frame(pop_decoded_frame());
+		UniqueAvFrame decoded_frame(pop_decoded_frame());
 		if (!decoded_frame)
 		{
 			bool reached_eof;
@@ -1666,26 +1645,7 @@ void MusicPlayerLibrary::AudioFile::audio_bit_perfect_worker_thread()
 				"Decoded audio format changed after the bit-perfect handshake");
 		}
 
-		const auto frame_count = static_cast<std::uint32_t>(
-			decoded_frame->nb_samples);
-		const auto byte_count = static_cast<std::size_t>(frame_count) *
-			audio_output_format.wave_format.Format.nBlockAlign;
-		const auto stream_frame_offset = normalized_stream_frames_.fetch_add(
-			frame_count, std::memory_order_acq_rel);
-		const double stream_origin = stream_origin_seconds_.load(
-			std::memory_order_acquire);
-		const NormalizedPcmBlock observed_block{
-			.bytes = std::span<const std::uint8_t>(
-				decoded_frame->extended_data[0], byte_count),
-			.frame_count = frame_count,
-			.pts_seconds = stream_origin +
-				static_cast<double>(stream_frame_offset) /
-					audio_output_format.sample_rate,
-			.stream_frame_offset = stream_frame_offset,
-			.generation = audio_stream_generation_.load(std::memory_order_acquire),
-			.end_of_stream = false
-		};
-		notify_observers_pcm(observed_block);
+		notify_observers_pcm_frame(*decoded_frame);
 
 		{
 			std::lock_guard fifo_lock(audio_fifo_mutex);
@@ -1711,29 +1671,12 @@ void MusicPlayerLibrary::AudioFile::audio_bit_perfect_worker_thread()
 
 void MusicPlayerLibrary::AudioFile::audio_normalize_worker_thread()
 {
-	auto wait_for_fifo_room = [this]
-		{
-			while (playback_state.load() != audio_playback_state_stopped && !user_request_stop.load())
-			{
-				int fifo_size;
-				{
-					std::lock_guard fifo_lock(audio_fifo_mutex);
-					fifo_size = get_audio_fifo_cached_samples_size();
-				}
-				if (fifo_size < get_audio_fifo_high_watermark())
-					return true;
-
-				wait_frame_underrun(std::chrono::milliseconds(2));
-			}
-			return false;
-		};
-
 	auto drain_normalized_audio_to_fifo = [this]()
 		{
 			while (true)
 			{
 				const int res = av_buffersink_get_frame(
-					normalization_sink_context, normalized_frame);
+					normalization_sink_context, normalized_frame.get());
 				if (res == AVERROR(EAGAIN))
 					// 归一化滤镜已排空，从 decoded_frame_queue 取下一帧。
 					return true;
@@ -1752,27 +1695,7 @@ void MusicPlayerLibrary::AudioFile::audio_normalize_worker_thread()
 					return false;
 				}
 
-				const auto normalized_frame_count = static_cast<std::uint32_t>(
-					normalized_frame->nb_samples);
-				const auto normalized_byte_count = static_cast<std::size_t>(
-					normalized_frame_count) *
-					audio_output_format.wave_format.Format.nBlockAlign;
-				const auto stream_frame_offset = normalized_stream_frames_.fetch_add(
-					normalized_frame_count, std::memory_order_acq_rel);
-				const double stream_origin = stream_origin_seconds_.load(
-					std::memory_order_acquire);
-				const NormalizedPcmBlock observed_block{
-					.bytes = std::span<const std::uint8_t>(
-						normalized_frame->extended_data[0], normalized_byte_count),
-					.frame_count = normalized_frame_count,
-					.pts_seconds = stream_origin +
-						static_cast<double>(stream_frame_offset) /
-							audio_output_format.sample_rate,
-					.stream_frame_offset = stream_frame_offset,
-					.generation = audio_stream_generation_.load(),
-					.end_of_stream = false
-				};
-				notify_observers_pcm(observed_block);
+				notify_observers_pcm_frame(*normalized_frame);
 
 				{
 					std::lock_guard fifo_lock(audio_fifo_mutex);
@@ -1780,13 +1703,13 @@ void MusicPlayerLibrary::AudioFile::audio_normalize_worker_thread()
 						normalized_frame->extended_data, normalized_frame->nb_samples);
 						ret_code < 0)
 					{
-						av_frame_unref(normalized_frame);
+						av_frame_unref(normalized_frame.get());
 						playback_state.store(audio_playback_state_stopped);
 						FFMPEG_CRITICAL_ERROR(ret_code);
 						return false;
 					}
 				}
-				av_frame_unref(normalized_frame);
+				av_frame_unref(normalized_frame.get());
 				notify_frame_ready();
 			}
 		};
@@ -1794,10 +1717,10 @@ void MusicPlayerLibrary::AudioFile::audio_normalize_worker_thread()
 	bool filter_flush_sent = false;
 	while (playback_state.load() != audio_playback_state_stopped && !user_request_stop.load())
 	{
-		if (!wait_for_fifo_room())
+		if (!wait_for_audio_fifo_room())
 			break;
 
-		UniqueAVFrame decoded_frame(pop_decoded_frame());
+		UniqueAvFrame decoded_frame(pop_decoded_frame());
 		if (!decoded_frame)
 		{
 			bool reached_eof;
@@ -1826,7 +1749,7 @@ void MusicPlayerLibrary::AudioFile::audio_normalize_worker_thread()
 			}
 			if (!drain_normalized_audio_to_fifo())
 				break;
-			std::this_thread::sleep_for(std::chrono::milliseconds(1));
+			std::this_thread::sleep_for(PlaybackPollInterval);
 			continue;
 		}
 
@@ -1898,16 +1821,52 @@ void MusicPlayerLibrary::AudioFile::handle_worker_exception(const std::string& m
 	user_request_stop.store(true);
 	decoder_is_running = false;
 	normalizer_is_running = false;
-	{
-		std::lock_guard queue_lock(decoded_frame_queue_mutex);
-		decoded_frame_queue_abort = true;
-	}
-	decoded_frame_queue_cv.notify_all();
-	notify_all_frame_notifications();
+	abort_decoded_frame_queue_waiters();
 	if (audio_sink_)
 		audio_sink_->AbortStream();
 
 	publish_message({PlayerMessageType::Error, message});
+}
+
+void MusicPlayerLibrary::AudioFile::audio_normalizer_dispatch_worker_thread()
+{
+	if (is_audio_file_and_sink_bit_perfect.load(std::memory_order_acquire))
+		audio_bit_perfect_worker_thread();
+	else
+		audio_normalize_worker_thread();
+}
+
+void MusicPlayerLibrary::AudioFile::run_scheduled_audio_worker(
+	const wchar_t* task_name,
+	const MPL_AUDIO_PRIORITY priority,
+	const char* worker_name,
+	const AudioWorker worker)
+{
+	auto thread_schedule = CreateDefaultAudioThreadScheduleHelper(
+		task_name, priority, worker_name);
+	if (!thread_schedule)
+	{
+		NATIVE_TRACE(
+			"warn: Audio thread scheduler factory is not implemented on this system");
+	}
+
+	try
+	{
+		(this->*worker)();
+	}
+	catch (const std::exception& exception)
+	{
+		handle_worker_exception(
+			std::format("Unhandled native exception in {} worker: {}",
+				worker_name, exception.what()),
+			worker_name);
+	}
+	catch (...)
+	{
+		handle_worker_exception(
+			std::format("Unhandled unknown exception in {} worker.", worker_name),
+			worker_name);
+	}
 }
 
 
@@ -1923,32 +1882,9 @@ void MusicPlayerLibrary::AudioFile::init_decoder_thread() {
 	decoder_is_running = true;
 	audio_decoder_worker_thread = std::jthread(
 		[this] {
-			std::unique_ptr<IAudioThreadScheduleHelper> mmcss;
-			if (auto audio_scheduler_factory = GetDefaultAudioThreadSchedulerFactory(); audio_scheduler_factory != nullptr)
-			{
-				mmcss = GetDefaultAudioThreadSchedulerFactory()->CreateAudioThreadScheduleHelper(L"Audio", MPL_AUDIO_PRIORITY::MPL_AUDIO_PRIORITY_HIGH, "decoder");
-			}
-			else
-			{
-				NATIVE_TRACE("warn: Audio thread scheduler factory is not implemented on this system");
-				mmcss = nullptr;
-			}
-			static_cast<void>(mmcss); // suppress warning. unique_ptr only manage the scheduler's life cycle.
-			try
-			{
-				audio_decode_worker_thread();
-			}
-			catch (const std::exception& exception)
-			{
-				std::string message = std::format("Unhandled native exception in decoder worker: {}", exception.what());
-				handle_worker_exception(message, "decoder");
-				return;
-			}
-			catch (...)
-			{
-				handle_worker_exception("Unhandled unknown exception in decoder worker.", "decoder");
-				return;
-			}
+			run_scheduled_audio_worker(
+				AudioMmcssTaskName, MPL_AUDIO_PRIORITY::MPL_AUDIO_PRIORITY_HIGH,
+				"decoder", &AudioFile::audio_decode_worker_thread);
 			decoder_is_running = false;
 		});
 	NATIVE_TRACE("info: decoder thread created\n");
@@ -1964,39 +1900,9 @@ void MusicPlayerLibrary::AudioFile::init_normalizer_thread()
 	normalizer_is_running = true;
 	audio_normalizer_worker_thread = std::jthread(
 		[this] {
-			std::unique_ptr<IAudioThreadScheduleHelper> mmcss;
-			if (auto audio_scheduler_factory = GetDefaultAudioThreadSchedulerFactory(); audio_scheduler_factory != nullptr)
-			{
-				mmcss = GetDefaultAudioThreadSchedulerFactory()->CreateAudioThreadScheduleHelper(L"Audio", MPL_AUDIO_PRIORITY::MPL_AUDIO_PRIORITY_HIGH, "normalizer");
-			}
-			else
-			{
-				NATIVE_TRACE("warn: Audio thread scheduler factory is not implemented on this system");
-				mmcss = nullptr;
-			}
-			try
-			{
-				if (is_audio_file_and_sink_bit_perfect.load(
-					std::memory_order_acquire))
-				{
-					audio_bit_perfect_worker_thread();
-				}
-				else
-				{
-					audio_normalize_worker_thread();
-				}
-			}
-			catch (const std::exception& exception)
-			{
-				std::string message = std::format("Unhandled native exception in normalizer worker: {}", exception.what());
-				handle_worker_exception(message, "normalizer");
-				return;
-			}
-			catch (...)
-			{
-				handle_worker_exception("Unhandled unknown exception in normalizer worker.", "normalizer");
-				return;
-			}
+			run_scheduled_audio_worker(
+				AudioMmcssTaskName, MPL_AUDIO_PRIORITY::MPL_AUDIO_PRIORITY_HIGH,
+				"normalizer", &AudioFile::audio_normalizer_dispatch_worker_thread);
 			normalizer_is_running = false;
 		});
 	NATIVE_TRACE("info: audio normalizer thread created\n");
@@ -2029,29 +1935,9 @@ inline void MusicPlayerLibrary::AudioFile::start_audio_playback()
 	user_request_stop.store(false);
 	audio_player_worker_thread = std::jthread(
 		[this] {
-			std::unique_ptr<IAudioThreadScheduleHelper> mmcss;
-			if (auto audio_scheduler_factory = GetDefaultAudioThreadSchedulerFactory(); audio_scheduler_factory != nullptr)
-			{
-				mmcss = GetDefaultAudioThreadSchedulerFactory()->CreateAudioThreadScheduleHelper(L"Pro Audio", MPL_AUDIO_PRIORITY::MPL_AUDIO_PRIORITY_CRITICAL, "playback");
-			}
-			else
-			{
-				NATIVE_TRACE("warn: Audio thread scheduler factory is not implemented on this system");
-				mmcss = nullptr;
-			}
-			try
-			{
-				audio_playback_worker_thread();
-			}
-			catch (const std::exception& exception)
-			{
-				std::string message = std::format("Unhandled native exception in playback worker: {}", exception.what());
-				handle_worker_exception(message, "playback");
-			}
-			catch (...)
-			{
-				handle_worker_exception("Unhandled unknown exception in playback worker.", "playback");
-			}
+			run_scheduled_audio_worker(
+				AudioMmcssTaskName, MPL_AUDIO_PRIORITY::MPL_AUDIO_PRIORITY_HIGH,
+				"playback", &AudioFile::audio_playback_worker_thread);
 		});
 	NATIVE_TRACE("info: player thread created\n");
 	// notify decoder to start decoding
@@ -2062,12 +1948,7 @@ void MusicPlayerLibrary::AudioFile::stop_audio_decode(int mode)
 	if (audio_decoder_worker_thread.joinable() || audio_normalizer_worker_thread.joinable())
 	{
 		playback_state.store(audio_playback_state_stopped);
-		{
-			std::lock_guard queue_lock(decoded_frame_queue_mutex);
-			decoded_frame_queue_abort = true;
-		}
-		decoded_frame_queue_cv.notify_all();
-		notify_all_frame_notifications();
+		abort_decoded_frame_queue_waiters();
 		if (audio_decoder_worker_thread.joinable())
 		{
 			audio_decoder_worker_thread.request_stop();
@@ -2083,12 +1964,7 @@ void MusicPlayerLibrary::AudioFile::stop_audio_normalizer()
 {
 	if (audio_normalizer_worker_thread.joinable())
 	{
-		{
-			std::lock_guard queue_lock(decoded_frame_queue_mutex);
-			decoded_frame_queue_abort = true;
-		}
-		decoded_frame_queue_cv.notify_all();
-		notify_all_frame_notifications();
+		abort_decoded_frame_queue_waiters();
 		audio_normalizer_worker_thread.request_stop();
 		audio_normalizer_worker_thread.join();
 	}
@@ -2135,7 +2011,7 @@ void MusicPlayerLibrary::AudioFile::stop_audio_playback(int mode)
 
 int MusicPlayerLibrary::AudioFile::initialize_audio_fifo(AVSampleFormat sample_fmt, int channels, int nb_samples)
 {
-	audio_fifo = av_audio_fifo_alloc(sample_fmt, channels, nb_samples);
+	audio_fifo.reset(av_audio_fifo_alloc(sample_fmt, channels, nb_samples));
 	if (!audio_fifo)
 	{
 		// AfxMessageBox(_T("err: could not allocate audio fifo!"), MB_ICONERROR);
@@ -2149,7 +2025,7 @@ int MusicPlayerLibrary::AudioFile::resize_audio_fifo(int nb_samples)
 {
 	if (!audio_fifo)
 		return -1;
-	if (int ret_value; (ret_value = av_audio_fifo_realloc(audio_fifo, nb_samples)) < 0) {
+	if (int ret_value; (ret_value = av_audio_fifo_realloc(audio_fifo.get(), nb_samples)) < 0) {
 		FFMPEG_CRITICAL_ERROR(ret_value);
 		return ret_value;
 	}
@@ -2160,7 +2036,7 @@ int MusicPlayerLibrary::AudioFile::add_samples_to_fifo(uint8_t** decoded_data, i
 {
 	if (!audio_fifo)
 		return -1;
-	if (int res = av_audio_fifo_write(audio_fifo, reinterpret_cast<void**>(decoded_data), nb_samples); res < 0) {
+	if (int res = av_audio_fifo_write(audio_fifo.get(), reinterpret_cast<void**>(decoded_data), nb_samples); res < 0) {
 		// audio fifo will resize automatically
 		FFMPEG_CRITICAL_ERROR(res);
 		return res;
@@ -2174,7 +2050,7 @@ int MusicPlayerLibrary::AudioFile::read_samples_from_fifo(uint8_t** output_buffe
 	int ret;
 	if (!audio_fifo)
 		return -1;
-	if ((ret = av_audio_fifo_read(audio_fifo, reinterpret_cast<void**>(output_buffer), nb_samples)) < 0) {
+	if ((ret = av_audio_fifo_read(audio_fifo.get(), reinterpret_cast<void**>(output_buffer), nb_samples)) < 0) {
 		FFMPEG_CRITICAL_ERROR(ret);
 		return -1;
 	}
@@ -2185,7 +2061,7 @@ void MusicPlayerLibrary::AudioFile::drain_audio_fifo(int nb_samples)
 {
 	if (!audio_fifo)
 		return;
-	if (int ret; (ret = av_audio_fifo_drain(audio_fifo, nb_samples)) < 0) {
+	if (int ret; (ret = av_audio_fifo_drain(audio_fifo.get(), nb_samples)) < 0) {
 		FFMPEG_CRITICAL_ERROR(ret);
 	}
 }
@@ -2194,23 +2070,19 @@ void MusicPlayerLibrary::AudioFile::reset_audio_fifo()
 {
 	if (!audio_fifo)
 		return;
-	av_audio_fifo_reset(audio_fifo);
+	av_audio_fifo_reset(audio_fifo.get());
 }
 
 int MusicPlayerLibrary::AudioFile::get_audio_fifo_cached_samples_size()
 {
 	if (!audio_fifo)
 		return -1;
-	return av_audio_fifo_size(audio_fifo);
+	return av_audio_fifo_size(audio_fifo.get());
 }
 
 void MusicPlayerLibrary::AudioFile::uninitialize_audio_fifo()
 {
-	if (audio_fifo)
-	{
-		av_audio_fifo_free(audio_fifo);
-		audio_fifo = nullptr;
-	}
+	audio_fifo.reset();
 }
 
 inline const char* MusicPlayerLibrary::AudioFile::get_backend_implement_version() // NOLINT(*-convert-member-functions-to-static)
@@ -2233,9 +2105,9 @@ bool MusicPlayerLibrary::AudioFile::is_audio_sink_initialized()
 
 void MusicPlayerLibrary::AudioFile::dialog_ffmpeg_critical_error(int err_code, const char* file, int line) // NOLINT(*-convert-member-functions-to-static)
 {
-	char buf[1024] = { 0 };
-	av_strerror(err_code, buf, 1024);
-	std::string detail = std::format("FFmpeg critical error: {} (file: {}, line: {})\n", buf, file, line);
+	std::string detail = std::format(
+		"FFmpeg critical error: {} (file: {}, line: {})\n",
+		GetFFmpegErrorMessage(err_code), file, line);
 	throw std::runtime_error(detail);
 }
 
@@ -2248,7 +2120,7 @@ MusicPlayerLibrary::AudioFile::AudioFile(
 	message_sink_(message_sink)
 {
 	const AudioOutputFormat requested = output_format.value_or(AudioOutputFormat{});
-	Connect(sink ? std::move(sink) : std::make_shared<FAudioSink>(requested));
+	Connect(sink ? std::move(sink) : CreateAudioSink(requested));
 	fft_observer_ = std::make_shared<FFTAudioObserve>(audio_output_format);
 	Subscribe(fft_observer_);
 	NATIVE_TRACE("info: decode frontend: avformat version %d, avcodec version %d, avutil version %d, avfilter version %d\n",
@@ -2256,7 +2128,14 @@ MusicPlayerLibrary::AudioFile::AudioFile(
 		avcodec_version(),
 		avutil_version(),
 		avfilter_version());
-	NATIVE_TRACE("info: audio api backend: FAudio, version %s\n", get_backend_implement_version());
+	NATIVE_TRACE(
+		"info: audio api backend: %s%s\n",
+		audio_sink_->IsExclusiveModeEnabled()
+			? "WASAPI exclusive"
+			: "FAudio shared, version ",
+		audio_sink_->IsExclusiveModeEnabled()
+			? ""
+			: get_backend_implement_version());
 	NATIVE_TRACE("info: audio output format: sample_rate=%d, channels=%u, channel_mask=0x%x, bits=%d, ffmpeg_layout=%s\n",
 		audio_output_format.sample_rate,
 		audio_output_format.channel_count,
@@ -2280,6 +2159,19 @@ void MusicPlayerLibrary::AudioFile::Connect(std::shared_ptr<IAudioSink> sink)
 		audio_sink_->AbortStream();
 	audio_sink_ = std::move(sink);
 	audio_output_format = audio_sink_->GetOutputFormat();
+	const auto block_align = (std::max)(
+		static_cast<std::uint32_t>(audio_output_format.wave_format.Format.nBlockAlign),
+		std::uint32_t{1});
+	const auto maximum_submit_frames = (std::min)(
+		static_cast<std::uint32_t>(
+			(std::numeric_limits<int>::max)() / 8),
+		(std::numeric_limits<std::uint32_t>::max)() / block_align);
+	const auto preferred_submit_frames = (std::min)(
+		audio_sink_->GetPreferredSubmitFrameCount(),
+		maximum_submit_frames);
+	sink_submit_frame_size = (std::max)(
+		MinimumSinkSubmitFrameCount,
+		static_cast<int>(preferred_submit_frames));
 	is_audio_file_and_sink_bit_perfect.store(false, std::memory_order_release);
 }
 
@@ -2335,20 +2227,16 @@ MusicPlayerLibrary::AudioFile::GetNormalizedFormat() const noexcept
 int MusicPlayerLibrary::AudioFile::init_audio_normalization_filter()
 {
 	std::lock_guard graph_lock(filter_graph_mutex);
-	normalization_filter_graph = avfilter_graph_alloc();
+	clear_audio_normalization_filter_locked();
+	normalization_filter_graph.reset(avfilter_graph_alloc());
 	if (!normalization_filter_graph)
 	{
 		NATIVE_TRACE("err: avfilter_graph_alloc failed\n");
 		return -1;
 	}
 	auto release_normalization_filter = [this]() noexcept {
-		if (normalization_filter_graph)
-			avfilter_graph_free(&normalization_filter_graph);
-		normalization_filter_graph = nullptr;
-		normalization_source_context = normalization_sink_context = nullptr;
-		resample_context = nullptr;
-		format_normalization_context = nullptr;
-		};
+		clear_audio_normalization_filter_locked();
+	};
 	auto fail_filter = [&release_normalization_filter](int code) {
 		release_normalization_filter();
 		return code;
@@ -2371,7 +2259,7 @@ int MusicPlayerLibrary::AudioFile::init_audio_normalization_filter()
 	int ret = avfilter_graph_create_filter(
 		&normalization_source_context,
 		avfilter_get_by_name("abuffer"),
-		"src", args.c_str(), nullptr, normalization_filter_graph);
+		"src", args.c_str(), nullptr, normalization_filter_graph.get());
 	if (ret < 0)
 	{
 		return fail_filter_with_ffmpeg(ret);
@@ -2388,7 +2276,7 @@ int MusicPlayerLibrary::AudioFile::init_audio_normalization_filter()
 	ret = avfilter_graph_create_filter(
 		&resample_context,
 		avfilter_get_by_name("aresample"),
-		"resample", resample_args.c_str(), nullptr, normalization_filter_graph);
+		"resample", resample_args.c_str(), nullptr, normalization_filter_graph.get());
 	if (ret < 0)
 	{
 		return fail_filter_with_ffmpeg(ret);
@@ -2398,7 +2286,7 @@ int MusicPlayerLibrary::AudioFile::init_audio_normalization_filter()
 	ret = avfilter_graph_create_filter(
 		&normalization_sink_context,
 		avfilter_get_by_name("abuffersink"),
-		"sink", nullptr, nullptr, normalization_filter_graph);
+		"sink", nullptr, nullptr, normalization_filter_graph.get());
 	if (ret < 0)
 	{
 		return fail_filter_with_ffmpeg(ret);
@@ -2410,7 +2298,7 @@ int MusicPlayerLibrary::AudioFile::init_audio_normalization_filter()
 		audio_output_format.ffmpeg_channel_layout);
 	ret = avfilter_graph_create_filter(&format_normalization_context,
 		avfilter_get_by_name("aformat"),
-		"aformat", fmt_args.c_str(), nullptr, normalization_filter_graph);
+		"aformat", fmt_args.c_str(), nullptr, normalization_filter_graph.get());
 	if (ret < 0)
 	{
 		return fail_filter_with_ffmpeg(ret);
@@ -2423,7 +2311,7 @@ int MusicPlayerLibrary::AudioFile::init_audio_normalization_filter()
 		return fail_filter_with_ffmpeg(ret);
 	}
 
-	ret = avfilter_graph_config(normalization_filter_graph, nullptr);
+	ret = avfilter_graph_config(normalization_filter_graph.get(), nullptr);
 	if (ret < 0)
 	{
 		return fail_filter_with_ffmpeg(ret);
@@ -2451,15 +2339,18 @@ bool MusicPlayerLibrary::AudioFile::is_audio_normalization_filter_initialized()
 	return normalization_source_context && normalization_sink_context;
 }
 
-void MusicPlayerLibrary::AudioFile::reset_audio_normalization_filter()
+void MusicPlayerLibrary::AudioFile::clear_audio_normalization_filter_locked() noexcept
 {
-	std::lock_guard graph_lock(filter_graph_mutex);
-	if (normalization_filter_graph)
-		avfilter_graph_free(&normalization_filter_graph);
-	normalization_filter_graph = nullptr;
+	normalization_filter_graph.reset();
 	normalization_source_context = normalization_sink_context = nullptr;
 	resample_context = nullptr;
 	format_normalization_context = nullptr;
+}
+
+void MusicPlayerLibrary::AudioFile::reset_audio_normalization_filter()
+{
+	std::lock_guard graph_lock(filter_graph_mutex);
+	clear_audio_normalization_filter_locked();
 }
 
 bool MusicPlayerLibrary::AudioFile::IsInitialized()
@@ -2479,9 +2370,7 @@ void MusicPlayerLibrary::AudioFile::OpenFile(const std::wstring& fileName, const
 		audio_decoder_worker_thread.joinable() || audio_normalizer_worker_thread.joinable())
 	{
 		user_request_stop.store(true);
-		close_audio_session();
-		reset_audio_normalization_filter();
-		release_audio_context();
+		release_audio_session_resources();
 	}
 	user_request_stop.store(false);
 	is_pause.store(false);
@@ -2490,11 +2379,6 @@ void MusicPlayerLibrary::AudioFile::OpenFile(const std::wstring& fileName, const
 	playback_state.store(audio_playback_state_init);
 	reset_frame_notifications();
 
-	auto cleanup_failed_open = [this]() {
-		close_audio_session();
-		reset_audio_normalization_filter();
-		release_audio_context();
-		};
 	try
 	{
 		if (load_audio_context(fileName, file_extension_in, skip_album_art_loading)) {
@@ -2511,7 +2395,7 @@ void MusicPlayerLibrary::AudioFile::OpenFile(const std::wstring& fileName, const
 	}
 	catch (...)
 	{
-		cleanup_failed_open();
+		release_audio_session_resources();
 		throw;
 	}
 }
@@ -2520,9 +2404,7 @@ void MusicPlayerLibrary::AudioFile::Close()
 {
 	user_request_stop.store(true);
 	playback_state.store(audio_playback_state_stopped);
-	close_audio_session();
-	reset_audio_normalization_filter();
-	release_audio_context();
+	release_audio_session_resources();
 	user_request_stop.store(false);
 	is_pause.store(false);
 	pts_seconds.store(0.0);
@@ -2534,26 +2416,15 @@ void MusicPlayerLibrary::AudioFile::Close()
 
 double MusicPlayerLibrary::AudioFile::GetMusicTimeLength()
 {
-	if (IsInitialized()) {
-		if (fabs(length.load() - 0.0) < 0.0001) {
-			AVStream* audio_stream = format_context->streams[audio_stream_index];
-			int64_t duration = audio_stream->duration;
-			if (duration != AV_NOPTS_VALUE)
-			{
-				AVRational time_base = audio_stream->time_base;
-				length = static_cast<double>(duration) * av_q2d(time_base);
-			}
-			else
-			{
-				// some stream doesn't contains duration info.
-				return format_context->duration != AV_NOPTS_VALUE
-						? format_context->duration * 1.0 / AV_TIME_BASE
-						: 0.0;
-			}
-		}
-		return length;
+	if (!IsInitialized())
+		return 0.0;
+	double duration = length.load(std::memory_order_relaxed);
+	if (duration <= 0.0)
+	{
+		duration = GetAudioStreamDurationSeconds(format_context, audio_stream_index);
+		length.store(duration, std::memory_order_relaxed);
 	}
-	return 0.0;
+	return duration;
 }
 
 double MusicPlayerLibrary::AudioFile::GetCurrentMusicPosition()
@@ -2619,7 +2490,8 @@ bool MusicPlayerLibrary::AudioFile::IsHiResAudio() const noexcept
 bool MusicPlayerLibrary::AudioFile::IsBitPerfect() const noexcept
 {
 	return is_audio_file_and_sink_bit_perfect.load(std::memory_order_acquire) &&
-		audio_sink_ && !audio_sink_->IsLimiterEnabled();
+		audio_sink_ && audio_sink_->IsExclusiveModeEnabled() &&
+		!audio_sink_->IsLimiterEnabled();
 }
 
 int MusicPlayerLibrary::AudioFile::GetAverageAudioBitrate() const noexcept
@@ -2683,7 +2555,7 @@ void MusicPlayerLibrary::AudioFile::SetSampleRate(int sample_rate)
 	}
 	AudioOutputFormat requested = audio_output_format;
 	requested.requested_sample_rate = sample_rate;
-	Connect(std::make_shared<FAudioSink>(requested));
+	Connect(CreateAudioSink(requested));
 }
 
 int MusicPlayerLibrary::AudioFile::GetNBlockAlign()
@@ -2752,18 +2624,7 @@ MusicPlayerLibrary::AudioFile::~AudioFile()
 		stop_audio_playback(-1);
 	}
 	stop_audio_decode();
-	close_audio_session();
-
-	if (audio_fifo)
-		uninitialize_audio_fifo();
-	reset_audio_normalization_filter();
-	release_audio_context();
-
-	if (file_stream)
-	{
-		file_stream->Close();
-		file_stream.reset();
-	}
+	release_audio_session_resources();
 }
 
 #if defined(FFMPEG_CRITICAL_ERROR)

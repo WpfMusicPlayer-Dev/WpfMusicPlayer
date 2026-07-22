@@ -6,8 +6,6 @@
 #include <string_view>
 #include <vector>
 
-#include "Core/FileAbstractionLayer.h"
-#include "Core/LocaleConverter.h"
 #include "Lyric/MLPipeline/MLPipelineCommon.h"
 #include "Lyric/MLPipeline/NCNNPipeline.h"
 #ifdef _MSC_VER
@@ -22,6 +20,8 @@
 
 namespace
 {
+    constexpr std::string_view NcnnOutputBlobName = "out0";
+
     class BoundedMemoryDataReader final : public ncnn::DataReader
     {
     public:
@@ -58,46 +58,11 @@ namespace
         const unsigned char* end_;
     };
 
-    std::string display_path(const std::wstring& path)
+    std::uint64_t FingerprintNcnnModel(
+        const MusicPlayerLibrary::MLPipeline::NcnnModelFiles& files)
     {
-        const auto utf8_path = MusicPlayerLibrary::LocaleConverter::GetUtf8StringFromUtf16String(path);
-        return utf8_path.empty() && !path.empty() ? "<unrepresentable path>" : utf8_path;
-    }
+        using namespace MusicPlayerLibrary::MLPipeline;
 
-    std::vector<unsigned char> read_binary_file(
-        const std::wstring& path,
-        const std::string_view description)
-    {
-        auto file = MusicPlayerLibrary::GetDefaultFileSystem().OpenReadFile(path, true, true);
-        if (!file)
-        {
-            throw std::runtime_error(
-                "failed to open " + std::string(description) + ": " + display_path(path));
-        }
-
-        const auto length = file->GetLength();
-        if (length == 0)
-            throw std::runtime_error(std::string(description) + " is empty: " + display_path(path));
-
-        std::vector<unsigned char> contents;
-        if (length > static_cast<std::uint64_t>(contents.max_size()))
-            throw std::runtime_error(std::string(description) + " is too large: " + display_path(path));
-
-        contents.resize(static_cast<std::size_t>(length));
-        MusicPlayerLibrary::MLPipeline::read_exact(
-            *file,
-            reinterpret_cast<char*>(contents.data()),
-            contents.size(),
-            path);
-        return contents;
-    }
-}
-
-namespace MusicPlayerLibrary::MLPipeline
-{
-
-    std::uint64_t fingerprint_ncnn_model(const NcnnModelFiles& files)
-    {
         std::uint64_t fingerprint = fnv_offset_basis;
         constexpr std::string_view domain = "WMP-NCNN-MODEL-V1";
         fingerprint_bytes(fingerprint, domain.data(), domain.size());
@@ -105,13 +70,16 @@ namespace MusicPlayerLibrary::MLPipeline
         fingerprint_file(fingerprint, "weights", files.weights);
         return fingerprint;
     }
+}
 
+namespace MusicPlayerLibrary::MLPipeline
+{
     class NcnnClassifier::Impl
     {
     public:
         explicit Impl(const NcnnModelFiles& files)
             : input_size(read_ncnn_input_size(files.param)),
-              model_fingerprint(fingerprint_ncnn_model(files)),
+              model_fingerprint(FingerprintNcnnModel(files)),
               model_data(read_binary_file(files.weights, "NCNN weights file"))
         {
             auto param_data = read_binary_file(files.param, "NCNN param file");
@@ -181,12 +149,18 @@ namespace MusicPlayerLibrary::MLPipeline
         std::memcpy(input.data, features.data(), features.size_bytes());
 
         auto extractor = impl_->net.create_extractor();
-        if (extractor.input("in0", input) != 0)
-            throw std::runtime_error("failed to set NCNN input blob 'in0'");
+        if (extractor.input(NcnnInputBlobName.data(), input) != 0)
+        {
+            throw std::runtime_error(
+                "failed to set NCNN input blob '" + std::string(NcnnInputBlobName) + "'");
+        }
 
         ncnn::Mat output;
-        if (extractor.extract("out0", output) != 0)
-            throw std::runtime_error("failed to extract NCNN output blob 'out0'");
+        if (extractor.extract(NcnnOutputBlobName.data(), output) != 0)
+        {
+            throw std::runtime_error(
+                "failed to extract NCNN output blob '" + std::string(NcnnOutputBlobName) + "'");
+        }
 
         const auto* begin = static_cast<const float*>(output.data);
         return { begin, begin + output.total() };

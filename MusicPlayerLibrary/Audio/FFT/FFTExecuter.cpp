@@ -7,7 +7,9 @@
 #include <numbers>
 #include <stdexcept>
 
+#include "Audio/FFmpeg/FFmpegError.h"
 #include "Audio/FFT/FFTExecuter.h"
+#include "Core/BinaryData.h"
 
 #if defined(__cplusplus)
 extern "C" {
@@ -18,16 +20,6 @@ extern "C" {
 #if defined(__cplusplus)
 }
 #endif
-
-namespace
-{
-	std::string FfmpegErrorMessage(const int error_code)
-	{
-		char message[AV_ERROR_MAX_STRING_SIZE]{};
-		av_strerror(error_code, message, sizeof(message));
-		return message;
-	}
-}
 
 std::vector<uint8_t> MusicPlayerLibrary::FFTExecuter::ResampleToFftFormat(
 	const uint8_t* interleaved_samples,
@@ -40,22 +32,23 @@ std::vector<uint8_t> MusicPlayerLibrary::FFTExecuter::ResampleToFftFormat(
 	if (!resample_context)
 		return {};
 
-	const int output_capacity = swr_get_out_samples(resample_context, frame_count);
+	const int output_capacity = swr_get_out_samples(
+		resample_context.get(), frame_count);
 	if (output_capacity < 0)
 	{
 		NATIVE_TRACE("err: query FFT resample output size failed, reason=%s\n",
-			FfmpegErrorMessage(output_capacity).c_str());
+			GetFFmpegErrorMessage(output_capacity).c_str());
 		return {};
 	}
 	if (output_capacity == 0)
 		return {};
 
 	std::vector<uint8_t> result(
-		static_cast<size_t>(output_capacity) * BYTES_PER_FRAME);
+		static_cast<size_t>(output_capacity) * BytesPerFrame);
 	const uint8_t* input_planes[] = { interleaved_samples };
 	uint8_t* output_planes[] = { result.data() };
 	const int converted_frames = swr_convert(
-		resample_context,
+		resample_context.get(),
 		output_planes,
 		output_capacity,
 		input_planes,
@@ -63,11 +56,11 @@ std::vector<uint8_t> MusicPlayerLibrary::FFTExecuter::ResampleToFftFormat(
 	if (converted_frames < 0)
 	{
 		NATIVE_TRACE("err: FFT resample failed, reason=%s\n",
-			FfmpegErrorMessage(converted_frames).c_str());
+			GetFFmpegErrorMessage(converted_frames).c_str());
 		return {};
 	}
 
-	result.resize(static_cast<size_t>(converted_frames) * BYTES_PER_FRAME);
+	result.resize(static_cast<size_t>(converted_frames) * BytesPerFrame);
 	return result;
 }
 
@@ -114,24 +107,25 @@ void MusicPlayerLibrary::FFTExecuter::AddSamplesToRingBuffer(
 
 	// A slow observer must not create unbounded memory growth. Drop complete
 	// media hops while retaining enough samples for the next FFT window.
-	if (spectrum_data_ring_buffer.size() > RING_BUFFER_CAPACITY)
+	if (spectrum_data_ring_buffer.size() > RingBufferCapacityBytes)
 	{
 		const std::size_t excess_frames =
-			(spectrum_data_ring_buffer.size() - RING_BUFFER_CAPACITY +
-				BYTES_PER_FRAME - 1) / BYTES_PER_FRAME;
+			(spectrum_data_ring_buffer.size() - RingBufferCapacityBytes +
+				BytesPerFrame - 1) / BytesPerFrame;
 		const std::size_t drop_frames =
-			((excess_frames + FFT_HOP_SIZE - 1) / FFT_HOP_SIZE) *
-			FFT_HOP_SIZE;
+			((excess_frames + FftHopFrames - 1) / FftHopFrames) *
+			FftHopFrames;
 		const std::size_t drop_bytes = (std::min)(
-			drop_frames * BYTES_PER_FRAME,
+			drop_frames * BytesPerFrame,
 			spectrum_data_ring_buffer.size());
 		for (std::size_t index = 0; index < drop_bytes; ++index)
 			spectrum_data_ring_buffer.pop_front();
 		ring_buffer_start_pts_seconds +=
-			static_cast<double>(drop_bytes / BYTES_PER_FRAME) / sample_rate;
+			static_cast<double>(drop_bytes / BytesPerFrame) /
+			StandardAudioSampleRate;
 	}
 	ring_buffer_has_unprocessed_data =
-		spectrum_data_ring_buffer.size() >= RING_BUFFER_MAX_SIZE;
+		spectrum_data_ring_buffer.size() >= RingBufferWindowBytes;
 
 	// wake fft consumer thread
 	if (ring_buffer_has_unprocessed_data)
@@ -146,13 +140,20 @@ int MusicPlayerLibrary::FFTExecuter::GetRingBufferSize() const
 
 void MusicPlayerLibrary::FFTExecuter::ApplyWindow(const std::vector<uint8_t>& input, std::vector<double>& output)
 {
-	const size_t bytes_per_frame = 4;  // 2 channels * 2 bytes
-	const size_t frame_count = input.size() / bytes_per_frame;
+	const size_t frame_count = input.size() / BytesPerFrame;
 	output.resize(frame_count);
 
 	for (size_t i = 0; i < frame_count; ++i) {
-		auto left = static_cast<int16_t>(input[i * 4] | (input[i * 4 + 1] << 8));
-		auto right = static_cast<int16_t>(input[i * 4 + 2] | (input[i * 4 + 3] << 8));
+		const size_t frame_offset = i * BytesPerFrame;
+		const auto left = static_cast<std::int16_t>(
+			DecodeLittleEndian<std::uint16_t>(
+				std::span<const std::uint8_t, sizeof(std::uint16_t)>(
+					input.data() + frame_offset, sizeof(std::uint16_t))));
+		const auto right = static_cast<std::int16_t>(
+			DecodeLittleEndian<std::uint16_t>(
+				std::span<const std::uint8_t, sizeof(std::uint16_t)>(
+					input.data() + frame_offset + sizeof(std::uint16_t),
+					sizeof(std::uint16_t))));
 		// mix 2 channels
 		double sample = (static_cast<double>(left) + static_cast<double>(right)) / 2.0;
 		// hamming window
@@ -174,7 +175,7 @@ void MusicPlayerLibrary::FFTExecuter::DoFFT(const std::vector<double>& windowed_
 		fft_in[i].i = 0.0f;
 	}
 	// zero padding
-	for (size_t i = n; i < fft_size; ++i) {
+	for (size_t i = n; i < FftSize; ++i) {
 		fft_in[i].r = 0.0;
 		fft_in[i].i = 0.0;
 	}
@@ -182,8 +183,8 @@ void MusicPlayerLibrary::FFTExecuter::DoFFT(const std::vector<double>& windowed_
 	kiss_fft(fft_cfg, fft_in.data(), fft_out.data());
 
 	// Magnitude spectrum.
-	fft_result.resize(fft_size / 2);
-	for (size_t i = 0; i < fft_size / 2; ++i) {
+	fft_result.resize(FftSize / 2);
+	for (size_t i = 0; i < FftSize / 2; ++i) {
 		float real = fft_out[i].r;
 		float imag = fft_out[i].i;
 		fft_result[i] = sqrtf(real * real + imag * imag);
@@ -235,25 +236,26 @@ void MusicPlayerLibrary::FFTExecuter::ExecuteAudioFFT()
 	{
 		std::lock_guard lock(ring_buffer_mutex);
 		// Check whether the buffer contains a complete FFT frame.
-		if (spectrum_data_ring_buffer.size() < RING_BUFFER_MAX_SIZE || !ring_buffer_has_unprocessed_data)
+		if (spectrum_data_ring_buffer.size() < RingBufferWindowBytes || !ring_buffer_has_unprocessed_data)
 			return;
 
 		// drain data
 		raw_samples.assign(
 			spectrum_data_ring_buffer.begin(),
-			spectrum_data_ring_buffer.begin() + RING_BUFFER_MAX_SIZE);
+			spectrum_data_ring_buffer.begin() + RingBufferWindowBytes);
 		spectrum_end_pts_seconds = ring_buffer_start_pts_seconds +
-			static_cast<double>(FFT_SIZE) / sample_rate;
+			static_cast<double>(FftSize) / StandardAudioSampleRate;
 		work_epoch = timeline_epoch.load(std::memory_order_acquire);
 		const std::size_t hop_bytes = (std::min)(
-			FFT_HOP_SIZE * BYTES_PER_FRAME,
+			FftHopFrames * BytesPerFrame,
 			spectrum_data_ring_buffer.size());
 		for (std::size_t index = 0; index < hop_bytes; ++index)
 			spectrum_data_ring_buffer.pop_front();
 		ring_buffer_start_pts_seconds +=
-			static_cast<double>(hop_bytes / BYTES_PER_FRAME) / sample_rate;
+			static_cast<double>(hop_bytes / BytesPerFrame) /
+			StandardAudioSampleRate;
 		ring_buffer_has_unprocessed_data =
-			spectrum_data_ring_buffer.size() >= RING_BUFFER_MAX_SIZE;
+			spectrum_data_ring_buffer.size() >= RingBufferWindowBytes;
 	}
 
 	// windowing
@@ -264,7 +266,7 @@ void MusicPlayerLibrary::FFTExecuter::ExecuteAudioFFT()
 
 	// FFT
 	std::vector<float> fft_result;
-	DoFFT(windowed, fft_result, fft_cfg);
+	DoFFT(windowed, fft_result, fft_cfg.get());
 
 	if (fft_result.empty())
 		return;
@@ -272,7 +274,8 @@ void MusicPlayerLibrary::FFTExecuter::ExecuteAudioFFT()
 	// customizable sample rate, 32 segments
 	constexpr size_t segment_num = 32;
 
-	auto boundaries = GenBoundaries(sample_rate, fft_size, segment_num);
+	auto boundaries = GenBoundaries(
+		StandardAudioSampleRate, FftSize, segment_num);
 
 	std::vector<float> new_spectrum;
 	MapFreqToSegments(fft_result, new_spectrum, boundaries);
@@ -304,7 +307,7 @@ void MusicPlayerLibrary::FFTExecuter::ExecuteAudioFFT()
 			.end_pts_seconds = spectrum_end_pts_seconds,
 			.bands = std::move(new_spectrum)
 		});
-		while (spectrum_timeline.size() > MAX_SPECTRUM_QUEUE_SIZE)
+		while (spectrum_timeline.size() > MaximumSpectrumQueueSize)
 			spectrum_timeline.pop_front();
 	}
 }
@@ -363,18 +366,25 @@ int MusicPlayerLibrary::FFTExecuter::CopyAudioFFTDataAt(
 	return copy_count;
 }
 
+void MusicPlayerLibrary::FFTExecuter::ClearSpectrumOutput()
+{
+	std::lock_guard lock(spectrum_data_mutex);
+	spectrum_data.clear();
+	spectrum_timeline.clear();
+}
+
 void MusicPlayerLibrary::FFTExecuter::ResetBuffers()
 {
 	{
 		std::lock_guard resample_lock(resample_mutex);
 		if (resample_context)
 		{
-			swr_close(resample_context);
-			if (const int result = swr_init(resample_context); result < 0)
+			swr_close(resample_context.get());
+			if (const int result = swr_init(resample_context.get()); result < 0)
 			{
 				NATIVE_TRACE("err: reset FFT resample context failed, reason=%s\n",
-					FfmpegErrorMessage(result).c_str());
-				swr_free(&resample_context);
+					GetFFmpegErrorMessage(result).c_str());
+				resample_context.reset();
 			}
 		}
 	}
@@ -392,12 +402,7 @@ void MusicPlayerLibrary::FFTExecuter::ResetBuffers()
 		ring_timeline_initialized = false;
 	}
 
-	{
-		std::lock_guard lock(spectrum_data_mutex);
-		spectrum_data.clear();
-		spectrum_smooth_data.clear();
-		spectrum_timeline.clear();
-	}
+	ClearSpectrumOutput();
 }
 
 void MusicPlayerLibrary::FFTExecuter::StartFFTThread()
@@ -417,12 +422,7 @@ void MusicPlayerLibrary::FFTExecuter::StopFFTThread()
 	if (fft_worker_thread.joinable())
 		fft_worker_thread.join();
 
-	{
-		std::lock_guard lock(spectrum_data_mutex);
-		spectrum_data.clear();
-		spectrum_smooth_data.clear();
-		spectrum_timeline.clear();
-	}
+	ClearSpectrumOutput();
 	{
 		std::lock_guard lock(ring_buffer_mutex);
 		spectrum_data_ring_buffer.clear();
@@ -441,7 +441,7 @@ void MusicPlayerLibrary::FFTExecuter::FFTWorkerLoop()
 			{
 				return !fft_thread_running ||
 					(ring_buffer_has_unprocessed_data &&
-						spectrum_data_ring_buffer.size() >= RING_BUFFER_MAX_SIZE);
+						spectrum_data_ring_buffer.size() >= RingBufferWindowBytes);
 			});
 
 		if (!fft_thread_running)
@@ -483,7 +483,7 @@ MusicPlayerLibrary::FFTExecuter::FFTExecuter(const AudioOutputFormat& output_for
 		&local_resample_context,
 		&fft_layout,
 		AV_SAMPLE_FMT_S16,
-		FFT_SAMPLE_RATE,
+		StandardAudioSampleRate,
 		&input_layout,
 		output_format.sample_format,
 		output_format.sample_rate,
@@ -491,41 +491,31 @@ MusicPlayerLibrary::FFTExecuter::FFTExecuter(const AudioOutputFormat& output_for
 		nullptr);
 	av_channel_layout_uninit(&fft_layout);
 	av_channel_layout_uninit(&input_layout);
-	if (result < 0 || !local_resample_context)
+	UniqueSwrContext local_resample(local_resample_context);
+	if (result < 0 || !local_resample)
 	{
 		throw std::runtime_error(
-			"swr_alloc_set_opts2 failed: " + FfmpegErrorMessage(result));
+			"swr_alloc_set_opts2 failed: " + GetFFmpegErrorMessage(result));
 	}
-	result = swr_init(local_resample_context);
+	result = swr_init(local_resample.get());
 	if (result < 0)
 	{
-		swr_free(&local_resample_context);
-		throw std::runtime_error("swr_init failed: " + FfmpegErrorMessage(result));
+		throw std::runtime_error("swr_init failed: " + GetFFmpegErrorMessage(result));
 	}
 
-	fft_cfg = kiss_fft_alloc(fft_size, 0, nullptr, nullptr);
+	fft_cfg = AllocateKissFftConfig(static_cast<int>(FftSize));
 	if (!fft_cfg)
 	{
-		swr_free(&local_resample_context);
 		throw std::runtime_error("kiss_fft_alloc failed!");
 	}
-	resample_context = local_resample_context;
+	resample_context = std::move(local_resample);
 
-	fft_in.resize(fft_size);
-	fft_out.resize(fft_size);
+	fft_in.resize(FftSize);
+	fft_out.resize(FftSize);
 	StartFFTThread();
 }
 
 MusicPlayerLibrary::FFTExecuter::~FFTExecuter()
 {
 	StopFFTThread();
-	{
-		std::lock_guard resample_lock(resample_mutex);
-		swr_free(&resample_context);
-	}
-	if (fft_cfg)
-	{
-		kiss_fft_free(fft_cfg);
-		fft_cfg = nullptr;
-	}
 }

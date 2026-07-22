@@ -191,8 +191,49 @@
             <TextBlock Text="音频" Foreground="#0078D7" FontSize="15" FontWeight="SemiBold" Margin="0,0,0,14"/>
 			<TextBlock Text="注意：如果您更改了音频设置，您需要重新启动应用程序以使更改生效" Foreground="#FFFFE0" FontSize="12" FontWeight="Bold" Margin="0,0,0,14" TextWrapping="Wrap"/>
 
+            <Grid Margin="0,0,0,14">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="Auto"/>
+                    <ColumnDefinition Width="*"/>
+                </Grid.ColumnDefinitions>
+                <StackPanel Grid.Column="0" VerticalAlignment="Center">
+                    <TextBlock Text="音频后端" Foreground="White" FontSize="14"/>
+                    <TextBlock Text="选择共享或独占输出实现" Foreground="#99FFFFFF" FontSize="12" Margin="0,2,0,0"/>
+                </StackPanel>
+                <ComboBox Grid.Column="1" HorizontalAlignment="Right"
+                          Style="{StaticResource SettingsComboBoxStyle}"
+                          ItemContainerStyle="{StaticResource SettingsComboBoxItemStyle}"
+                          SelectedValue="{Binding SelectedBackend}"
+                          SelectedValuePath="Value"
+                          DisplayMemberPath="DisplayName"
+                          ItemsSource="{Binding BackendOptions}"/>
+            </Grid>
+
+            <Border Height="1" Background="#15FFFFFF" Margin="0,0,0,14"/>
+
+            <Grid Margin="0,0,0,14">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="Auto"/>
+                    <ColumnDefinition Width="*"/>
+                </Grid.ColumnDefinitions>
+                <StackPanel Grid.Column="0" VerticalAlignment="Center">
+                    <TextBlock Text="输出设备" Foreground="White" FontSize="14"/>
+                    <TextBlock Text="选择当前后端使用的音频设备" Foreground="#99FFFFFF" FontSize="12" Margin="0,2,0,0"/>
+                </StackPanel>
+                <ComboBox Grid.Column="1" HorizontalAlignment="Right"
+                          Style="{StaticResource SettingsComboBoxStyle}"
+                          ItemContainerStyle="{StaticResource SettingsComboBoxItemStyle}"
+                          SelectedValue="{Binding SelectedOutputDeviceId}"
+                          SelectedValuePath="Id"
+                          DisplayMemberPath="DisplayName"
+                          ItemsSource="{Binding OutputDeviceOptions}"/>
+            </Grid>
+
+            <Border Height="1" Background="#15FFFFFF" Margin="0,0,0,14"/>
+
             <Button Content="应用系统输出设置"
                     Command="{Binding ApplySystemOutputSettingsCommand}"
+                    IsEnabled="{Binding IsOutputFormatSelectionEnabled}"
                     Style="{StaticResource SettingsActionButtonStyle}"
                     HorizontalAlignment="Right"
                     Margin="0,0,0,14"
@@ -208,6 +249,7 @@
                     <TextBlock Text="选择音频输出声道" Foreground="#99FFFFFF" FontSize="12" Margin="0,2,0,0"/>
                 </StackPanel>
                 <ComboBox Grid.Column="1" HorizontalAlignment="Right"
+                          IsEnabled="{Binding IsOutputFormatSelectionEnabled}"
                           Style="{StaticResource SettingsComboBoxStyle}"
                           ItemContainerStyle="{StaticResource SettingsComboBoxItemStyle}"
                           SelectedItem="{Binding SelectedChannel}"
@@ -226,6 +268,7 @@
                     <TextBlock Text="选择音频输出位宽" Foreground="#99FFFFFF" FontSize="12" Margin="0,2,0,0"/>
                 </StackPanel>
                 <ComboBox Grid.Column="1" HorizontalAlignment="Right"
+                          IsEnabled="{Binding IsOutputFormatSelectionEnabled}"
                           Style="{StaticResource SettingsComboBoxStyle}"
                           ItemContainerStyle="{StaticResource SettingsComboBoxItemStyle}"
                           SelectedValue="{Binding SelectedBitDepth}"
@@ -246,6 +289,7 @@
                     <TextBlock Text="选择音频采样率 (Hz)" Foreground="#99FFFFFF" FontSize="12" Margin="0,2,0,0"/>
                 </StackPanel>
                 <ComboBox Grid.Column="1" HorizontalAlignment="Right"
+                          IsEnabled="{Binding IsOutputFormatSelectionEnabled}"
                           Style="{StaticResource SettingsComboBoxStyle}"
                           ItemContainerStyle="{StaticResource SettingsComboBoxItemStyle}"
                           SelectedItem="{Binding SelectedSampleRate}"

@@ -8,15 +8,11 @@ namespace MusicPlayerLibrary
     class VectorMemoryFile final : public IFile
     {
     public:
-        ~VectorMemoryFile() override;
-
         uint32_t Read(void* buffer, uint32_t count) override;
 
         void Write(const void* buffer, uint32_t count) override;
 
         uint64_t Seek(int64_t offset, FileSeekOrigin origin) override;
-
-        void SeekToBegin() override;
 
         uint64_t GetLength() const override;
 

@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: MIT
 
 #include "pch.h"
-#include "Audio/DSP/FapoEqualizer.h"
+#include "Audio/Pipeline/Sink/Common/FapoEqualizer.h"
+#include "Audio/AudioOutputFormat.h"
 
 #include <FAPOBase.h>
 
@@ -25,15 +26,7 @@ namespace MusicPlayerLibrary::AudioDsp
             FAPO_FLAG_BITSPERSAMPLE_MUST_MATCH |
             FAPO_FLAG_BUFFERCOUNT_MUST_MATCH |
             FAPO_FLAG_INPLACE_SUPPORTED;
-        constexpr std::uint16_t ExtensibleFormatBytes =
-            static_cast<std::uint16_t>(
-                sizeof(FAudioWaveFormatExtensible) - sizeof(FAudioWaveFormatEx));
-        constexpr FAudioGUID IeeeFloatSubFormat{
-            0x00000003, 0x0000, 0x0010,
-            {0x80, 0x00, 0x00, 0xaa, 0x00, 0x38, 0x9b, 0x71}
-        };
-
-        const FAPORegistrationProperties RegistrationProperties{
+		const FAPORegistrationProperties RegistrationProperties{
             {0x876956c2, 0x8f29, 0x4af4,
              {0x9b, 0x61, 0x42, 0xd0, 0xd3, 0xac, 0x7a, 0x31}},
             {'W', 'p', 'f', ' ', 'E', 'q', 'u', 'a', 'l', 'i', 'z', 'e', 'r', 0},
@@ -70,21 +63,6 @@ namespace MusicPlayerLibrary::AudioDsp
             return static_cast<EqualizerFapo*>(fapo);
         }
 
-        [[nodiscard]] bool HasValidSnapshotHeader(
-            const EqualizerDspSnapshot& snapshot) noexcept
-        {
-            return snapshot.abi_version == EqualizerSnapshotAbiVersion &&
-                snapshot.byte_size == sizeof(EqualizerDspSnapshot) &&
-                std::isfinite(snapshot.pre_gain) &&
-                snapshot.pre_gain >= 0.0f && snapshot.pre_gain <= 4.0f;
-        }
-
-        [[nodiscard]] bool GuidEquals(
-            const FAudioGUID& left, const FAudioGUID& right) noexcept
-        {
-            return std::memcmp(&left, &right, sizeof(FAudioGUID)) == 0;
-        }
-
         [[nodiscard]] bool IsExactFloat32Extensible(
             const FAudioWaveFormatEx* format) noexcept
         {
@@ -95,7 +73,7 @@ namespace MusicPlayerLibrary::AudioDsp
                 format->nSamplesPerSec < FAPO_MIN_FRAMERATE ||
                 format->nSamplesPerSec > FAPO_MAX_FRAMERATE ||
                 format->wBitsPerSample != 32 ||
-                format->cbSize != ExtensibleFormatBytes)
+				format->cbSize != FAudioExtensibleFormatExtraSize)
             {
                 return false;
             }
@@ -110,7 +88,8 @@ namespace MusicPlayerLibrary::AudioDsp
             return format->nBlockAlign == expectedBlockAlign &&
                 format->nAvgBytesPerSec == expectedAverageBytes &&
                 extensible->Samples.wValidBitsPerSample == 32 &&
-                GuidEquals(extensible->SubFormat, IeeeFloatSubFormat);
+				MusicPlayerLibrary::GuidEquals(
+					extensible->SubFormat, IeeeFloatAudioSubFormat);
         }
 
         [[nodiscard]] bool FormatsMatchExactly(
@@ -121,10 +100,11 @@ namespace MusicPlayerLibrary::AudioDsp
                 input, output, sizeof(FAudioWaveFormatExtensible)) == 0;
         }
 
-        [[nodiscard]] std::uint32_t ProbeFormatPair(
+        std::uint32_t FAPOCALL IsFormatPairSupportedCallback(
             void* fapo,
             const FAudioWaveFormatEx* first,
-            const FAudioWaveFormatEx* second) noexcept
+            const FAudioWaveFormatEx* second,
+            FAudioWaveFormatEx**) noexcept
         {
             if (fapo == nullptr || first == nullptr || second == nullptr)
                 return FAUDIO_E_INVALID_ARG;
@@ -135,24 +115,6 @@ namespace MusicPlayerLibrary::AudioDsp
                 return FAPO_E_FORMAT_UNSUPPORTED;
             }
             return FAUDIO_OK;
-        }
-
-        std::uint32_t FAPOCALL IsInputFormatSupportedCallback(
-            void* fapo,
-            const FAudioWaveFormatEx* outputFormat,
-            const FAudioWaveFormatEx* requestedInputFormat,
-            FAudioWaveFormatEx**) noexcept
-        {
-            return ProbeFormatPair(fapo, outputFormat, requestedInputFormat);
-        }
-
-        std::uint32_t FAPOCALL IsOutputFormatSupportedCallback(
-            void* fapo,
-            const FAudioWaveFormatEx* inputFormat,
-            const FAudioWaveFormatEx* requestedOutputFormat,
-            FAudioWaveFormatEx**) noexcept
-        {
-            return ProbeFormatPair(fapo, inputFormat, requestedOutputFormat);
         }
 
         void FAPOCALL DestroyCallback(void* fapo) noexcept
@@ -253,7 +215,7 @@ namespace MusicPlayerLibrary::AudioDsp
 
             const auto* snapshot =
                 static_cast<const EqualizerDspSnapshot*>(parameters);
-            if (!HasValidSnapshotHeader(*snapshot))
+			if (!IsValidEqualizerSnapshotHeader(*snapshot))
                 return;
             FAPOBase_SetParameters(
                 &FromFapo(fapo)->base, parameters, parameterByteSize);
@@ -374,7 +336,7 @@ namespace MusicPlayerLibrary::AudioDsp
         if (effect == nullptr)
             return FAUDIO_E_INVALID_ARG;
         *effect = nullptr;
-        if (!HasValidSnapshotHeader(initial))
+		if (!IsValidEqualizerSnapshotHeader(initial))
             return FAUDIO_E_INVALID_ARG;
 
         try
@@ -393,9 +355,9 @@ namespace MusicPlayerLibrary::AudioDsp
                 sizeof(EqualizerDspSnapshot),
                 0);
             equalizer->base.base.IsInputFormatSupported =
-                IsInputFormatSupportedCallback;
+                IsFormatPairSupportedCallback;
             equalizer->base.base.IsOutputFormatSupported =
-                IsOutputFormatSupportedCallback;
+                IsFormatPairSupportedCallback;
             equalizer->base.base.Reset = ResetCallback;
             equalizer->base.base.LockForProcess = LockForProcessCallback;
             equalizer->base.base.Process = ProcessCallback;

@@ -6,6 +6,7 @@ using System.Windows;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using WpfMusicPlayer.Helpers;
+using WpfMusicPlayer.Models;
 using WpfMusicPlayer.Services.Abstractions;
 using static WpfMusicPlayer.Models.ConfigData;
 
@@ -21,9 +22,16 @@ public sealed record BitDepthOption(AudioSettings.BitDepthType Value, string Dis
     public override string ToString() => DisplayName;
 }
 
+public sealed record AudioBackendOption(AudioSettings.BackendType Value, string DisplayName)
+{
+    public override string ToString() => DisplayName;
+}
+
 public partial class SettingsViewModel : ObservableObject
 {
     public const string AudioOutputSettingsChangeName = "AudioOutputSettings";
+    private const string DefaultOutputDeviceDisplayName = "系统默认";
+    private const string UnavailableOutputDeviceSuffix = "（当前不可用）";
 
     private readonly IConfigProvider _configProvider;
     private readonly IAudioOutputFormatProvider _audioOutputFormatProvider;
@@ -62,11 +70,54 @@ public partial class SettingsViewModel : ObservableObject
     }
 
     // Audio Settings
+    public AudioSettings.BackendType SelectedBackend
+    {
+        get;
+        set
+        {
+            if (!SetProperty(ref field, value))
+                return;
+
+            OnPropertyChanged(nameof(IsOutputFormatSelectionEnabled));
+            if (_isLoading)
+                return;
+
+            var preferredDeviceId = SelectedOutputDeviceId;
+            _isLoading = true;
+            try
+            {
+                RefreshOutputDeviceOptions(value, preferredDeviceId);
+            }
+            finally
+            {
+                _isLoading = false;
+            }
+
+            ApplyToConfig(AudioOutputSettingsChangeName);
+        }
+    }
+
+    public string SelectedOutputDeviceId
+    {
+        get;
+        set
+        {
+            value ??= string.Empty;
+            if (SetProperty(ref field, value))
+                ApplyToConfig();
+        }
+    } = string.Empty;
+
+    public bool IsOutputFormatSelectionEnabled =>
+        SelectedBackend == AudioSettings.BackendType.FAudio;
+
     public AudioSettings.ChannelType SelectedChannel
     {
         get;
         set
         {
+            if (!_isLoading && !IsOutputFormatSelectionEnabled)
+                return;
             if (SetProperty(ref field, value))
                 ApplyToConfig();
         }
@@ -77,6 +128,8 @@ public partial class SettingsViewModel : ObservableObject
         get;
         set
         {
+            if (!_isLoading && !IsOutputFormatSelectionEnabled)
+                return;
             if (SetProperty(ref field, value))
                 ApplyToConfig();
         }
@@ -87,6 +140,8 @@ public partial class SettingsViewModel : ObservableObject
         get;
         set
         {
+            if (!_isLoading && !IsOutputFormatSelectionEnabled)
+                return;
             if (SetProperty(ref field, value))
                 ApplyToConfig();
         }
@@ -150,6 +205,21 @@ public partial class SettingsViewModel : ObservableObject
     public UISettings.BackgroundMode[] BackgroundOptions { get; } =
         Enum.GetValues<UISettings.BackgroundMode>();
 
+#if WINDOWS
+    public AudioBackendOption[] BackendOptions { get; } =
+    [
+        new(AudioSettings.BackendType.FAudio, "FAudio（共享模式）"),
+        new(AudioSettings.BackendType.WasapiExclusive, "WASAPI（独占模式）")
+    ];
+#else
+    public AudioBackendOption[] BackendOptions { get; } =
+    [
+        new(AudioSettings.BackendType.FAudio, "FAudio（共享模式）")
+    ];
+#endif
+
+    public ObservableCollection<AudioOutputDeviceOption> OutputDeviceOptions { get; } = [];
+
     public AudioSettings.ChannelType[] ChannelOptions { get; } =
         Enum.GetValues<AudioSettings.ChannelType>()
             .Where(option => option != AudioSettings.ChannelType.System)
@@ -168,6 +238,9 @@ public partial class SettingsViewModel : ObservableObject
     [RelayCommand]
     private void ApplySystemOutputSettings()
     {
+        if (!IsOutputFormatSelectionEnabled)
+            return;
+
         WpfMusicPlayer.Models.SystemAudioOutputFormat systemFormat;
         try
         {
@@ -211,6 +284,10 @@ public partial class SettingsViewModel : ObservableObject
         try
         {
             ref var config = ref _configProvider.GetConfig();
+            SelectedBackend = config.Audio.Backend;
+            RefreshOutputDeviceOptions(
+                SelectedBackend,
+                config.Audio.OutputDeviceId ?? string.Empty);
             EnsureSampleRateOption(config.Audio.SampleRate);
             SelectedTheme = config.UI.Theme;
             SelectedBackground = config.UI.Background;
@@ -240,12 +317,72 @@ public partial class SettingsViewModel : ObservableObject
         SampleRateOptions.Insert(index, sampleRate);
     }
 
+    public string GetOutputDeviceDisplayName(string? deviceId)
+    {
+        if (string.IsNullOrEmpty(deviceId))
+            return DefaultOutputDeviceDisplayName;
+
+        return OutputDeviceOptions.FirstOrDefault(option =>
+                string.Equals(option.Id, deviceId, StringComparison.OrdinalIgnoreCase))
+            ?.DisplayName ?? deviceId;
+    }
+
+    private void RefreshOutputDeviceOptions(
+        AudioSettings.BackendType backend,
+        string? preferredDeviceId)
+    {
+        OutputDeviceOptions.Clear();
+        OutputDeviceOptions.Add(new AudioOutputDeviceOption(
+            string.Empty,
+            DefaultOutputDeviceDisplayName,
+            true));
+
+        foreach (var device in _audioOutputFormatProvider.GetAudioOutputDevices(backend))
+        {
+            if (string.IsNullOrWhiteSpace(device.Id) ||
+                OutputDeviceOptions.Any(option => string.Equals(
+                    option.Id,
+                    device.Id,
+                    StringComparison.OrdinalIgnoreCase)))
+            {
+                continue;
+            }
+
+            var displayName = device.IsDefault
+                ? $"{device.DisplayName}（当前默认）"
+                : device.DisplayName;
+            OutputDeviceOptions.Add(device with { DisplayName = displayName });
+        }
+
+        var selectedOption = OutputDeviceOptions.FirstOrDefault(option =>
+            string.Equals(
+                option.Id,
+                preferredDeviceId,
+                StringComparison.OrdinalIgnoreCase));
+
+        // An empty enumeration can mean that the endpoint is temporarily
+        // unavailable or that enumeration itself failed. Keep the persisted ID
+        // visible and selected until the user explicitly chooses System Default.
+        if (selectedOption is null && !string.IsNullOrWhiteSpace(preferredDeviceId))
+        {
+            selectedOption = new AudioOutputDeviceOption(
+                preferredDeviceId,
+                $"{preferredDeviceId}{UnavailableOutputDeviceSuffix}",
+                false);
+            OutputDeviceOptions.Add(selectedOption);
+        }
+
+        SelectedOutputDeviceId = selectedOption?.Id ?? string.Empty;
+    }
+
     private void ApplyToConfig([CallerMemberName] string? settingName = null)
     {
         if (_isLoading) return;
         ref var config = ref _configProvider.GetConfig();
         config.UI.Theme = SelectedTheme;
         config.UI.Background = SelectedBackground;
+        config.Audio.Backend = SelectedBackend;
+        config.Audio.OutputDeviceId = SelectedOutputDeviceId;
         config.Audio.Channel = SelectedChannel;
         config.Audio.BitDepth = SelectedBitDepth;
         config.Audio.SampleRate = SelectedSampleRate;

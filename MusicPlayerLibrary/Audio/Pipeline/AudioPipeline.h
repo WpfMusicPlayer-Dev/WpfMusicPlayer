@@ -71,6 +71,13 @@ namespace MusicPlayerLibrary
 		{
 			return false;
 		}
+		// Preferred source submission quantum. A value of zero leaves the
+		// source's default block size unchanged.
+		[[nodiscard]] virtual std::uint32_t GetPreferredSubmitFrameCount()
+			const noexcept
+		{
+			return 0;
+		}
 		virtual AudioStreamGeneration BeginStream() = 0;
 		virtual bool Submit(const NormalizedPcmBlock& block) = 0;
 		virtual bool EndStream() noexcept = 0;
@@ -82,6 +89,7 @@ namespace MusicPlayerLibrary
 		virtual void SetMasterVolume(float volume) noexcept = 0;
 		[[nodiscard]] virtual int GetEqualizerBand(int index) const noexcept = 0;
 		virtual void SetEqualizerBand(int index, int value) noexcept = 0;
+		virtual bool IsExclusiveModeEnabled() noexcept = 0;
 	};
 
 	class IAudioSource

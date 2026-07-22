@@ -23,11 +23,6 @@ namespace MusicPlayerLibrary
 		}
 	}
 
-	WindowsApiDiskFile::~WindowsApiDiskFile()
-	{
-		Close();
-	}
-
 	bool WindowsApiDiskFile::Open(const std::wstring& file_path, bool share_deny_write)
 	{
 		Close();
@@ -36,15 +31,15 @@ namespace MusicPlayerLibrary
 		if (!share_deny_write)
 			share_mode |= FILE_SHARE_WRITE;
 
-		file_ = CreateFileW(
+		file_.Reset(CreateFileW(
 			file_path.c_str(),
 			GENERIC_READ,
 			share_mode,
 			nullptr,
 			OPEN_EXISTING,
 			FILE_ATTRIBUTE_NORMAL,
-			nullptr);
-		if (file_ == INVALID_HANDLE_VALUE)
+			nullptr));
+		if (!file_)
 		{
 			NATIVE_TRACE(L"err: CreateFileW failed:%ls, gle=%lu\n", file_path.c_str(), ::GetLastError());
 			return false;
@@ -66,22 +61,22 @@ namespace MusicPlayerLibrary
 			return false;
 		}
 
-		wchar_t temp_file_path[MAX_PATH + 1] = {};
+		wchar_t temp_file_path[TempPathBufferLength] = {};
 		if (::GetTempFileNameW(temp_path, L"WMP", 0, temp_file_path) == 0)
 		{
 			NATIVE_TRACE("err: GetTempFileNameW failed, gle=%lu\n", ::GetLastError());
 			return false;
 		}
 
-		file_ = CreateFileW(
+		file_.Reset(CreateFileW(
 			temp_file_path,
 			GENERIC_READ | GENERIC_WRITE,
 			FILE_SHARE_READ,
 			nullptr,
 			CREATE_ALWAYS,
 			FILE_ATTRIBUTE_TEMPORARY | FILE_FLAG_DELETE_ON_CLOSE,
-			nullptr);
-		if (file_ == INVALID_HANDLE_VALUE)
+			nullptr));
+		if (!file_)
 		{
 			NATIVE_TRACE(L"err: CreateFileW failed:%ls, gle=%lu\n", temp_file_path, ::GetLastError());
 			::DeleteFileW(temp_file_path);
@@ -93,11 +88,11 @@ namespace MusicPlayerLibrary
 
 	uint32_t WindowsApiDiskFile::Read(void* buffer, uint32_t count)
 	{
-		if (file_ == INVALID_HANDLE_VALUE || buffer == nullptr || count == 0)
+		if (!file_ || buffer == nullptr || count == 0)
 			return 0;
 
 		DWORD bytes_read = 0;
-		if (!ReadFile(file_, buffer, count, &bytes_read, nullptr))
+		if (!ReadFile(file_.Get(), buffer, count, &bytes_read, nullptr))
 		{
 			NATIVE_TRACE("err: ReadFile failed, gle=%lu\n", ::GetLastError());
 			return 0;
@@ -108,11 +103,11 @@ namespace MusicPlayerLibrary
 
 	void WindowsApiDiskFile::Write(const void* buffer, uint32_t count)
 	{
-		if (file_ == INVALID_HANDLE_VALUE || buffer == nullptr || count == 0)
+		if (!file_ || buffer == nullptr || count == 0)
 			return;
 
 		DWORD bytes_written = 0;
-		if (!WriteFile(file_, buffer, count, &bytes_written, nullptr)
+		if (!WriteFile(file_.Get(), buffer, count, &bytes_written, nullptr)
 			|| bytes_written != static_cast<DWORD>(count))
 		{
 			NATIVE_TRACE("err: WriteFile failed, gle=%lu\n", ::GetLastError());
@@ -121,14 +116,15 @@ namespace MusicPlayerLibrary
 
 	uint64_t WindowsApiDiskFile::Seek(int64_t offset, FileSeekOrigin origin)
 	{
-		if (file_ == INVALID_HANDLE_VALUE)
+		if (!file_)
 			return SeekFailure;
 
 		LARGE_INTEGER distance = {
 			.QuadPart = offset
 		};
 		LARGE_INTEGER new_position = {};
-		if (!SetFilePointerEx(file_, distance, &new_position, ToWindowsSeekOrigin(origin)))
+		if (!SetFilePointerEx(
+			file_.Get(), distance, &new_position, ToWindowsSeekOrigin(origin)))
 		{
 			NATIVE_TRACE("err: SetFilePointerEx failed, gle=%lu\n", ::GetLastError());
 			return SeekFailure;
@@ -137,18 +133,13 @@ namespace MusicPlayerLibrary
 		return static_cast<uint64_t>(new_position.QuadPart);
 	}
 
-	void WindowsApiDiskFile::SeekToBegin()
-	{
-		Seek(0, FileSeekOrigin::Begin);
-	}
-
 	uint64_t WindowsApiDiskFile::GetLength() const
 	{
-		if (file_ == INVALID_HANDLE_VALUE)
+		if (!file_)
 			return 0;
 
 		LARGE_INTEGER file_size = {};
-		if (!GetFileSizeEx(file_, &file_size))
+		if (!GetFileSizeEx(file_.Get(), &file_size))
 		{
 			NATIVE_TRACE("err: GetFileSizeEx failed, gle=%lu\n", ::GetLastError());
 			return 0;
@@ -159,12 +150,12 @@ namespace MusicPlayerLibrary
 
 	uint64_t WindowsApiDiskFile::GetPosition() const
 	{
-		if (file_ == INVALID_HANDLE_VALUE)
+		if (!file_)
 			return 0;
 
 		LARGE_INTEGER distance = {};
 		LARGE_INTEGER position = {};
-		if (!SetFilePointerEx(file_, distance, &position, FILE_CURRENT))
+		if (!SetFilePointerEx(file_.Get(), distance, &position, FILE_CURRENT))
 		{
 			NATIVE_TRACE("err: SetFilePointerEx failed, gle=%lu\n", ::GetLastError());
 			return 0;
@@ -175,17 +166,7 @@ namespace MusicPlayerLibrary
 
 	void WindowsApiDiskFile::Close()
 	{
-		if (file_ != INVALID_HANDLE_VALUE)
-		{
-			CloseHandle(file_);
-			file_ = INVALID_HANDLE_VALUE;
-		}
+		file_.Reset();
 	}
 
-	bool WindowsApiDiskFile::GetReadBuffer(void** buffer_start, void** buffer_end)
-	{
-		UNREFERENCED_PARAMETER(buffer_start);
-		UNREFERENCED_PARAMETER(buffer_end);
-		return false;
-	}
 }

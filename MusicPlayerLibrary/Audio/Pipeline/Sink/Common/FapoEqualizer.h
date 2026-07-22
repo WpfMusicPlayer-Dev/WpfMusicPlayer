@@ -2,11 +2,24 @@
 
 #pragma once
 
+#include <memory>
+
 #include "Audio/DSP/EqualizerDsp.h"
 #include <FAPO.h>
 
 namespace MusicPlayerLibrary::AudioDsp
 {
+	struct FapoDeleter final
+	{
+		void operator()(FAPO* effect) const noexcept
+		{
+			if (effect != nullptr)
+				effect->Release(effect);
+		}
+	};
+
+	using UniqueFapo = std::unique_ptr<FAPO, FapoDeleter>;
+
     [[nodiscard]] std::uint32_t CreateEqualizerFapo(
         const EqualizerDspSnapshot& initial,
         const LimiterConfig& limiter,

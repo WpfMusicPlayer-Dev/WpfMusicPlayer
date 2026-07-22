@@ -69,4 +69,43 @@ public sealed class AudioOutputFormatProvider(
 
         return new SystemAudioOutputFormat(sampleRate, channel, bitDepth);
     }
+
+    public IReadOnlyList<AudioOutputDeviceOption> GetAudioOutputDevices(
+        AudioSettings.BackendType backend)
+    {
+        try
+        {
+            var nativeDevices = MusicPlayerManaged.GetAudioOutputDevices((int)backend);
+            if (nativeDevices is null || nativeDevices.Length == 0)
+                return [];
+
+            var devices = new List<AudioOutputDeviceOption>(nativeDevices.Length);
+            var knownIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            foreach (var nativeDevice in nativeDevices)
+            {
+                if (nativeDevice is null || string.IsNullOrWhiteSpace(nativeDevice.Id) ||
+                    !knownIds.Add(nativeDevice.Id))
+                {
+                    continue;
+                }
+
+                var displayName = string.IsNullOrWhiteSpace(nativeDevice.DisplayName)
+                    ? nativeDevice.Id
+                    : nativeDevice.DisplayName;
+                devices.Add(new AudioOutputDeviceOption(
+                    nativeDevice.Id,
+                    displayName,
+                    nativeDevice.IsDefault));
+            }
+            return devices;
+        }
+        catch (Exception exception)
+        {
+            logger.LogWarning(
+                exception,
+                "Unable to enumerate output devices for audio backend {AudioBackend}",
+                backend);
+            return [];
+        }
+    }
 }

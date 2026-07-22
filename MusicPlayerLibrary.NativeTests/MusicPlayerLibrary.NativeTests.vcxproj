@@ -146,17 +146,29 @@
     <ClCompile Include="..\MusicPlayerLibrary\Audio\DSP\EqualizerDsp.cpp">
       <Link>EqualizerDsp.cpp</Link>
     </ClCompile>
-    <ClCompile Include="..\MusicPlayerLibrary\Audio\DSP\FapoEqualizer.cpp">
+    <ClCompile Include="..\MusicPlayerLibrary\Audio\DSP\EqualizerSettings.cpp">
+      <Link>EqualizerSettings.cpp</Link>
+    </ClCompile>
+    <ClCompile Include="..\MusicPlayerLibrary\Audio\DSP\PcmSampleConversion.cpp">
+      <Link>PcmSampleConversion.cpp</Link>
+    </ClCompile>
+    <ClCompile Include="..\MusicPlayerLibrary\Audio\FFmpeg\FFmpegError.cpp">
+      <Link>FFmpegError.cpp</Link>
+    </ClCompile>
+    <ClCompile Include="..\MusicPlayerLibrary\Audio\Pipeline\Sink\Common\FapoEqualizer.cpp">
       <Link>FapoEqualizer.cpp</Link>
     </ClCompile>
-    <ClCompile Include="..\MusicPlayerLibrary\Audio\Pipeline\Device\FAudioOutputDevice.cpp">
+    <ClCompile Include="..\MusicPlayerLibrary\Audio\Pipeline\Device\Common\FAudioOutputDevice.cpp">
       <Link>FAudioOutputDevice.cpp</Link>
     </ClCompile>
-    <ClCompile Include="..\MusicPlayerLibrary\Audio\Pipeline\Sink\FAudioSink.cpp">
+    <ClCompile Include="..\MusicPlayerLibrary\Audio\Pipeline\Sink\Common\FAudioSink.cpp">
       <Link>FAudioSink.cpp</Link>
     </ClCompile>
     <ClCompile Include="..\MusicPlayerLibrary\Audio\Pipeline\Observer\FFTAudioObserve.cpp">
       <Link>FFTAudioObserve.cpp</Link>
+    </ClCompile>
+    <ClCompile Include="..\MusicPlayerLibrary\Lyric\LrcTextParser.cpp">
+      <Link>LrcTextParser.cpp</Link>
     </ClCompile>
     <ClCompile Include="NativeTests.cpp" />
   </ItemGroup>
