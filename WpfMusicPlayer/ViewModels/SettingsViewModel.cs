@@ -79,6 +79,7 @@ public partial class SettingsViewModel : ObservableObject
                 return;
 
             OnPropertyChanged(nameof(IsOutputFormatSelectionEnabled));
+            OnPropertyChanged(nameof(OutputFormatSettingsVisibility));
             if (_isLoading)
                 return;
 
@@ -110,6 +111,11 @@ public partial class SettingsViewModel : ObservableObject
 
     public bool IsOutputFormatSelectionEnabled =>
         SelectedBackend == AudioSettings.BackendType.FAudio;
+
+    public Visibility OutputFormatSettingsVisibility =>
+        IsOutputFormatSelectionEnabled
+            ? Visibility.Visible
+            : Visibility.Collapsed;
 
     public AudioSettings.ChannelType SelectedChannel
     {
@@ -325,6 +331,54 @@ public partial class SettingsViewModel : ObservableObject
         return OutputDeviceOptions.FirstOrDefault(option =>
                 string.Equals(option.Id, deviceId, StringComparison.OrdinalIgnoreCase))
             ?.DisplayName ?? deviceId;
+    }
+
+    /// <summary>
+    /// Re-enumerates the current backend's output devices without persisting a
+    /// setting change. The current stable ID remains selected even when the
+    /// endpoint is temporarily unavailable.
+    /// </summary>
+    public void RefreshOutputDevices()
+    {
+        var wasLoading = _isLoading;
+        _isLoading = true;
+        try
+        {
+            RefreshOutputDeviceOptions(SelectedBackend, SelectedOutputDeviceId);
+        }
+        finally
+        {
+            _isLoading = wasLoading;
+        }
+    }
+
+    /// <summary>
+    /// Synchronizes the controls with an audio pipeline's effective settings.
+    /// The owner is responsible for persisting the normalized configuration;
+    /// this method deliberately raises no SettingChanged event and performs no
+    /// config write, preventing a fallback/update feedback loop.
+    /// </summary>
+    public void SynchronizeAudioSettings(AudioSettings audio)
+    {
+        ArgumentNullException.ThrowIfNull(audio);
+
+        var wasLoading = _isLoading;
+        _isLoading = true;
+        try
+        {
+            SelectedBackend = audio.Backend;
+            EnsureSampleRateOption(audio.SampleRate);
+            SelectedChannel = audio.Channel;
+            SelectedBitDepth = audio.BitDepth;
+            SelectedSampleRate = audio.SampleRate;
+            RefreshOutputDeviceOptions(
+                audio.Backend,
+                audio.OutputDeviceId ?? string.Empty);
+        }
+        finally
+        {
+            _isLoading = wasLoading;
+        }
     }
 
     private void RefreshOutputDeviceOptions(

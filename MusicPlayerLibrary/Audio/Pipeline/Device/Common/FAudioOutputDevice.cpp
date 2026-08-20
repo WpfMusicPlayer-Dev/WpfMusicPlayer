@@ -104,6 +104,24 @@ namespace
 
 }
 
+std::string MusicPlayerLibrary::MakeFAudioOutputDeviceCacheKey(
+	const AudioOutputFormat& requested)
+{
+	if (requested.requested_device_id.empty())
+		return {};
+
+	std::string result = requested.requested_device_id;
+	result.push_back('\0');
+	result.append(std::to_string(requested.requested_sample_rate));
+	result.push_back(':');
+	result.append(std::to_string(
+		static_cast<int>(requested.requested_channel_mode)));
+	result.push_back(':');
+	result.append(std::to_string(
+		static_cast<int>(requested.requested_bit_depth)));
+	return result;
+}
+
 MusicPlayerLibrary::FAudioOutputDevice::FAudioOutputDevice(
 	const AudioOutputFormat& requested)
 {
@@ -153,7 +171,7 @@ std::shared_ptr<MusicPlayerLibrary::FAudioOutputDevice>
 MusicPlayerLibrary::FAudioOutputDevice::Acquire(const AudioOutputFormat& requested)
 {
 	return SharedDeviceCache.Acquire(
-		requested.requested_device_id,
+		MakeFAudioOutputDeviceCacheKey(requested),
 		[&requested]
 		{
 			return std::shared_ptr<FAudioOutputDevice>(
@@ -184,6 +202,11 @@ MusicPlayerLibrary::FAudioOutputDevice::EnumerateOutputDevices()
 void MusicPlayerLibrary::FAudioOutputDevice::ShutdownShared() noexcept
 {
 	SharedDeviceCache.Shutdown();
+}
+
+void MusicPlayerLibrary::FAudioOutputDevice::InvalidateShared() noexcept
+{
+	SharedDeviceCache.Clear();
 }
 
 MusicPlayerLibrary::AudioOutputFormat

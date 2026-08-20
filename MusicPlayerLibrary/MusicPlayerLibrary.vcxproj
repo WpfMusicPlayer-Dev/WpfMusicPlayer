@@ -170,6 +170,7 @@
         <ClInclude Include="Audio\Pipeline\Device\AudioOutputDeviceLifecycle.h" />
         <ClInclude Include="Audio\Pipeline\Device\Common\FAudioOutputDevice.h" />
         <ClInclude Include="Audio\Pipeline\Device\Common\SharedAudioDeviceCache.h" />
+        <ClInclude Include="Audio\Pipeline\Device\Windows\AudioOutputDeviceNotification.h" Condition="'$(OS)' == 'Windows_NT'" />
         <ClInclude Include="Audio\Pipeline\Device\Windows\WasapiExclusiveOutputDevice.h" Condition="'$(OS)' == 'Windows_NT'" />
         <ClInclude Include="Audio\Pipeline\Observer\FFTAudioObserve.h" />
         <ClInclude Include="Audio\Pipeline\Sink\AudioSinkFactory.h" />
@@ -224,6 +225,7 @@
         <ClCompile Include="Audio\FFT\AudioPipelinePerformanceHelper.cpp" />
         <ClCompile Include="Audio\Pipeline\Device\AudioOutputDeviceLifecycle.cpp" />
         <ClCompile Include="Audio\Pipeline\Device\Common\FAudioOutputDevice.cpp" />
+        <ClCompile Include="Audio\Pipeline\Device\Windows\AudioOutputDeviceNotification.cpp" Condition="'$(OS)' == 'Windows_NT'" />
         <ClCompile Include="Audio\Pipeline\Device\Windows\WasapiExclusiveOutputDevice.cpp" Condition="'$(OS)' == 'Windows_NT'" />
         <ClCompile Include="Audio\Pipeline\Observer\FFTAudioObserve.cpp" />
         <ClCompile Include="Audio\Pipeline\Sink\AudioSinkFactory.cpp" />

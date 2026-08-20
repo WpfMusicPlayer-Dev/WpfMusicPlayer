@@ -35,12 +35,17 @@ namespace MusicPlayerLibrary
 	public delegate void PlayerDestroyDelegate();
 	public delegate void PlayerErrorDelegate(System::Exception^ exception);
 	public delegate void PlayerNcmRequireAlbumArtDownloadDelegate(System::String^ url);
+	public delegate void AudioOutputDeviceChangedDelegate();
 
 	public ref class MusicPlayerManaged:
 		System::ICloneable, System::IDisposable
 	{
 		AudioFile* native_handle = nullptr;
 		MusicPlayerEventBridge* event_bridge = nullptr;
+#if defined(_WIN32)
+		AudioOutputDeviceChangeSubscription*
+			audio_output_device_change_subscription = nullptr;
+#endif
 
 	public:
 		property PlayerFileInitDelegate^ OnPlayerFileInit;
@@ -52,6 +57,7 @@ namespace MusicPlayerLibrary
 		property PlayerDestroyDelegate^ OnPlayerDestroy;
 		property PlayerErrorDelegate^ OnPlayerError;
 		property PlayerNcmRequireAlbumArtDownloadDelegate^ OnPlayerNcmRequireAlbumArtDownload;
+		property AudioOutputDeviceChangedDelegate^ OnAudioOutputDeviceChanged;
 		
 		MusicPlayerManaged();
 		MusicPlayerManaged(int sample_rate);
@@ -79,6 +85,7 @@ namespace MusicPlayerLibrary
 		void ProcessEventCore(Object^ state);
 		void DrainEventQueue(Object^ state);
 		void release_native_resources();
+		void initialize_audio_output_device_notifications();
 
 		/*
 		* ProcessEvent is called by native code to notify managed code of various events, such as file initialization, album art initialization, playback start/pause/stop, and time change.
@@ -102,8 +109,14 @@ namespace MusicPlayerLibrary
 		System::String^ GetSongArtist();
 		System::String^ GetAudioSourceFormat();
 		System::String^ GetDeviceOutputFormat();
+		int GetActiveAudioBackend();
+		System::String^ GetActiveOutputDeviceId();
+		int GetDeviceOutputChannelType();
 		int GetDeviceOutputSampleRate();
+		int GetDeviceOutputBitDepth();
 		System::String^ GetSharedDeviceOutputFormat();
+		static void InvalidateAudioOutputDeviceCaches();
+		static System::UInt64 GetAudioOutputDeviceChangeRevision();
 		static void GetSystemDefaultOutputFormat(
 			[System::Runtime::InteropServices::OutAttribute] int% channel_type_id,
 			[System::Runtime::InteropServices::OutAttribute] int% sample_rate,

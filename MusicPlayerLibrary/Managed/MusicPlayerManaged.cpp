@@ -7,8 +7,10 @@
 #include <stdexcept>
 #include <vector>
 
+#include "Audio/Pipeline/Device/AudioOutputDeviceLifecycle.h"
 #include "Audio/Pipeline/Device/Common/FAudioOutputDevice.h"
 #if defined(_WIN32)
+#include "Audio/Pipeline/Device/Windows/AudioOutputDeviceNotification.h"
 #include "Audio/Pipeline/Device/Windows/WasapiExclusiveOutputDevice.h"
 #endif
 
@@ -177,6 +179,7 @@ MusicPlayerLibrary::MusicPlayerManaged::MusicPlayerManaged()
 	{
 		event_bridge = new MusicPlayerEventBridge(this);
 		native_handle = new AudioFile(event_bridge);
+		initialize_audio_output_device_notifications();
 	}
 	catch (const std::exception& exception)
 	{
@@ -195,6 +198,7 @@ MusicPlayerLibrary::MusicPlayerManaged::MusicPlayerManaged(int sample_rate)
 		AudioOutputFormat requested{};
 		requested.requested_sample_rate = sample_rate;
 		native_handle = new AudioFile(event_bridge, requested);
+		initialize_audio_output_device_notifications();
 	}
 	catch (const std::exception& exception)
 	{
@@ -218,6 +222,7 @@ MusicPlayerLibrary::MusicPlayerManaged::MusicPlayerManaged(
 		requested.requested_channel_mode = static_cast<AudioChannelMode>(channel_mode);
 		requested.requested_bit_depth = static_cast<AudioBitDepth>(bit_depth);
 		native_handle = new AudioFile(event_bridge, requested);
+		initialize_audio_output_device_notifications();
 	}
 	catch (const std::exception& exception)
 	{
@@ -254,6 +259,8 @@ void MusicPlayerLibrary::MusicPlayerManaged::ProcessEvent(int event_type, Object
 	case PlayerMessageType::Destroyed: state->Callback = OnPlayerDestroy; break;
 	case PlayerMessageType::Error: state->Callback = OnPlayerError; break;
 	case PlayerMessageType::TimeChanged: state->Callback = OnPlayerTimeChange; break;
+	case PlayerMessageType::AudioOutputDeviceChanged:
+		state->Callback = OnAudioOutputDeviceChanged; break;
 	default: state->Callback = nullptr; break;
 	}
 	event_queue->Enqueue(state);
@@ -287,6 +294,7 @@ MusicPlayerLibrary::MusicPlayerManaged::MusicPlayerManaged(
 				msclr::interop::marshal_as<std::string>(output_device_id);
 		}
 		native_handle = new AudioFile(event_bridge, requested);
+		initialize_audio_output_device_notifications();
 	}
 	catch (const std::exception& exception)
 	{
@@ -379,6 +387,10 @@ void MusicPlayerLibrary::MusicPlayerManaged::ProcessEventCore(Object^ stateObj)
 			double time = encoded_payload ? safe_cast<double>(state->Payload) : 0.0;
 			safe_cast<PlayerTimeChangeDelegate^>(state->Callback)(time);
 		}
+		break;
+	case PlayerMessageType::AudioOutputDeviceChanged:
+		if (state->Callback)
+			safe_cast<AudioOutputDeviceChangedDelegate^>(state->Callback)();
 		break;
 	default:
 		break;
@@ -494,10 +506,55 @@ System::String^ MusicPlayerLibrary::MusicPlayerManaged::GetDeviceOutputFormat()
 		format.channel_type_id, format.sample_rate, format.bit_depth);
 }
 
+int MusicPlayerLibrary::MusicPlayerManaged::GetActiveAudioBackend()
+{
+	if (!is_native_valid())
+		return static_cast<int>(AudioBackend::FAudio);
+	return static_cast<int>(
+		native_handle->GetNormalizedFormat().requested_backend);
+}
+
+System::String^ MusicPlayerLibrary::MusicPlayerManaged::GetActiveOutputDeviceId()
+{
+	if (!is_native_valid())
+		return System::String::Empty;
+	return ToManagedUtf8(
+		native_handle->GetNormalizedFormat().requested_device_id);
+}
+
+int MusicPlayerLibrary::MusicPlayerManaged::GetDeviceOutputChannelType()
+{
+	if (!is_native_valid())
+		return static_cast<int>(AudioChannelMode::Unknown);
+	return native_handle->GetDeviceOutputFormatInfo().channel_type_id;
+}
+
 int MusicPlayerLibrary::MusicPlayerManaged::GetDeviceOutputSampleRate()
 {
 	if (!is_native_valid()) return 0;
 	return native_handle->GetDeviceOutputFormatInfo().sample_rate;
+}
+
+int MusicPlayerLibrary::MusicPlayerManaged::GetDeviceOutputBitDepth()
+{
+	if (!is_native_valid())
+		return static_cast<int>(AudioBitDepth::Unknown);
+	return native_handle->GetDeviceOutputFormatInfo().bit_depth;
+}
+
+void MusicPlayerLibrary::MusicPlayerManaged::InvalidateAudioOutputDeviceCaches()
+{
+	MusicPlayerLibrary::InvalidateAudioOutputDevices();
+}
+
+System::UInt64 MusicPlayerLibrary::MusicPlayerManaged::
+GetAudioOutputDeviceChangeRevision()
+{
+#if defined(_WIN32)
+	return MusicPlayerLibrary::GetAudioOutputDeviceChangeRevision();
+#else
+	return 0;
+#endif
 }
 
 double MusicPlayerLibrary::MusicPlayerManaged::GetAudioSourceBitrate()
@@ -598,6 +655,7 @@ MusicPlayerLibrary::MusicPlayerManaged::~MusicPlayerManaged()
 	OnPlayerDestroy = nullptr;
 	OnPlayerError = nullptr;
 	OnPlayerNcmRequireAlbumArtDownload = nullptr;
+	OnAudioOutputDeviceChanged = nullptr;
 	System::GC::SuppressFinalize(this);
 }
 
@@ -613,15 +671,43 @@ void MusicPlayerLibrary::MusicPlayerManaged::!MusicPlayerManaged()
 	OnPlayerDestroy = nullptr;
 	OnPlayerError = nullptr;
 	OnPlayerNcmRequireAlbumArtDownload = nullptr;
+	OnAudioOutputDeviceChanged = nullptr;
 }
 
 void MusicPlayerLibrary::MusicPlayerManaged::release_native_resources()
 {
+#if defined(_WIN32)
+	delete audio_output_device_change_subscription;
+	audio_output_device_change_subscription = nullptr;
+#endif
 	AudioFile* handle = native_handle;
 	native_handle = nullptr;
 	delete handle;
 	delete event_bridge;
 	event_bridge = nullptr;
+}
+
+void MusicPlayerLibrary::MusicPlayerManaged::
+	initialize_audio_output_device_notifications()
+{
+#if defined(_WIN32)
+	try
+	{
+		auto subscription = SubscribeAudioOutputDeviceChanges(event_bridge);
+		audio_output_device_change_subscription = subscription.release();
+		if (!audio_output_device_change_subscription)
+		{
+			NATIVE_TRACE(
+				"warn: WASAPI output device notifications are unavailable\n");
+		}
+	}
+	catch (...)
+	{
+		audio_output_device_change_subscription = nullptr;
+		NATIVE_TRACE(
+			"warn: failed to subscribe to WASAPI output device notifications\n");
+	}
+#endif
 }
 
 int MusicPlayerLibrary::MusicPlayerManaged::CopyAudioFFTData(array<float>^ destination)

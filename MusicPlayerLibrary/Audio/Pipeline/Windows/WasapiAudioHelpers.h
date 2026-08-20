@@ -99,10 +99,24 @@ namespace MusicPlayerLibrary
 		std::vector<AudioBitDepth> bit_depths;
 	};
 
+	// The persisted managed configuration can represent only the four explicit
+	// channel layouts exposed by AudioChannelMode. Do not select an endpoint
+	// recommendation that the application could not faithfully write back.
+	[[nodiscard]] inline bool IsSerializableAudioOutputFormat(
+		const AudioOutputFormat& format) noexcept
+	{
+		const auto channel_mode = static_cast<AudioChannelMode>(
+			GetAudioChannelTypeId(format.channel_count, format.channel_mask));
+		return format.sample_rate > 0 &&
+			channel_mode != AudioChannelMode::Unknown &&
+			channel_mode != AudioChannelMode::System &&
+			(format.bit_depth == AudioBitDepth::Bit16 ||
+				format.bit_depth == AudioBitDepth::Bit24 ||
+				format.bit_depth == AudioBitDepth::Bit32);
+	}
+
 	[[nodiscard]] inline WasapiExclusiveProbeAxes
-		BuildWasapiExclusiveProbeAxes(
-			const AudioOutputFormat& requested,
-			const AudioOutputFormat& preferred)
+		BuildWasapiExclusiveProbeAxes(const AudioOutputFormat& preferred)
 	{
 		WasapiExclusiveProbeAxes result;
 		const auto append_unique = []<typename Value>(
@@ -113,24 +127,20 @@ namespace MusicPlayerLibrary
 				values.push_back(value);
 		};
 
-		if (requested.requested_sample_rate < 0)
-			throw std::invalid_argument("Unsupported audio sample rate");
-		if (requested.requested_sample_rate > 0)
-			append_unique(result.sample_rates, requested.requested_sample_rate);
-		if (preferred.sample_rate > 0)
-			append_unique(result.sample_rates, preferred.sample_rate);
-		append_unique(result.sample_rates, StandardAudioSampleRate);
-		append_unique(result.sample_rates, 44'100);
+		if (preferred.sample_rate <= 0)
+			throw std::invalid_argument("Unsupported preferred audio sample rate");
+		append_unique(result.sample_rates, preferred.sample_rate);
 		for (const int value : AudioOutputProbeSampleRates)
-			append_unique(result.sample_rates, value);
-
-		if (requested.requested_channel_mode == AudioChannelMode::Unknown)
-			throw std::invalid_argument("Unsupported audio channel mode");
-		if (requested.requested_channel_mode != AudioChannelMode::System)
 		{
-			append_unique(
-				result.channel_modes, requested.requested_channel_mode);
+			if (value <= preferred.sample_rate)
+				append_unique(result.sample_rates, value);
 		}
+
+		if (preferred.channel_count == 0)
+			throw std::invalid_argument("Unsupported preferred audio channel layout");
+		// System means the endpoint's recommended channel count and mask here;
+		// it does not refer back to the saved output-format setting.
+		append_unique(result.channel_modes, AudioChannelMode::System);
 		const auto preferred_channel_mode = static_cast<AudioChannelMode>(
 			GetAudioChannelTypeId(
 				preferred.channel_count, preferred.channel_mask));
@@ -139,23 +149,34 @@ namespace MusicPlayerLibrary
 		{
 			append_unique(result.channel_modes, preferred_channel_mode);
 		}
-		append_unique(result.channel_modes, AudioChannelMode::Stereo);
-		append_unique(result.channel_modes, AudioChannelMode::Mono);
 		for (const auto value : AudioOutputProbeChannelModes)
-			append_unique(result.channel_modes, value);
-
-		if (requested.requested_bit_depth == AudioBitDepth::Unknown)
-			throw std::invalid_argument("Unsupported audio bit depth");
-		if (requested.requested_bit_depth != AudioBitDepth::System)
-			append_unique(result.bit_depths, requested.requested_bit_depth);
-		if (preferred.bit_depth != AudioBitDepth::System &&
-			preferred.bit_depth != AudioBitDepth::Unknown)
 		{
-			append_unique(result.bit_depths, preferred.bit_depth);
+			const auto channel_count = [value]() -> std::uint16_t
+			{
+				switch (value)
+				{
+				case AudioChannelMode::Mono: return 1;
+				case AudioChannelMode::Stereo: return 2;
+				case AudioChannelMode::Surround51: return 6;
+				case AudioChannelMode::Surround71: return 8;
+				default: return 0;
+				}
+			}();
+			if (channel_count != 0 && channel_count <= preferred.channel_count)
+				append_unique(result.channel_modes, value);
 		}
-		append_unique(result.bit_depths, AudioBitDepth::Bit24);
-		append_unique(result.bit_depths, AudioBitDepth::Bit16);
-		append_unique(result.bit_depths, AudioBitDepth::Bit32);
+		if (preferred.bit_depth != AudioBitDepth::Bit16 &&
+			preferred.bit_depth != AudioBitDepth::Bit24 &&
+			preferred.bit_depth != AudioBitDepth::Bit32)
+		{
+			throw std::invalid_argument("Unsupported preferred audio bit depth");
+		}
+		append_unique(result.bit_depths, preferred.bit_depth);
+		for (const auto value : AudioOutputProbeBitDepths)
+		{
+			if (static_cast<int>(value) <= static_cast<int>(preferred.bit_depth))
+				append_unique(result.bit_depths, value);
+		}
 		return result;
 	}
 

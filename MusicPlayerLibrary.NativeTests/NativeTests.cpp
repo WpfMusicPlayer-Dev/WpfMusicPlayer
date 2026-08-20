@@ -8,6 +8,8 @@
 #include "Audio/AudioOutputFormat.h"
 #include "Audio/AudioOutputCapabilities.h"
 #include "Audio/Pipeline/AudioPipeline.h"
+#include "Audio/Pipeline/Device/Common/FAudioOutputDevice.h"
+#include "Audio/Pipeline/Device/Common/SharedAudioDeviceCache.h"
 #include "Audio/DSP/EqualizerDsp.h"
 #include "Audio/DSP/PcmSampleConversion.h"
 #include "Audio/FFmpeg/FFmpegResource.h"
@@ -1823,6 +1825,92 @@ namespace
                 "32-bit float output format was not resolved consistently");
     }
 
+    void TestAudioDeviceCacheKeysAndRuntimeInvalidation()
+    {
+        AudioOutputFormat requested{};
+        requested.requested_device_id = "explicit-output-device";
+        requested.requested_sample_rate = 44'100;
+        requested.requested_channel_mode =
+            MusicPlayerLibrary::AudioChannelMode::Stereo;
+        requested.requested_bit_depth =
+            MusicPlayerLibrary::AudioBitDepth::Bit16;
+        const auto initial_key =
+            MusicPlayerLibrary::MakeFAudioOutputDeviceCacheKey(requested);
+        NATIVE_REQUIRE(!initial_key.empty(),
+            "an explicit FAudio device did not produce a cache key");
+
+        auto changed = requested;
+        changed.requested_sample_rate = 48'000;
+        NATIVE_REQUIRE(
+            initial_key !=
+                MusicPlayerLibrary::MakeFAudioOutputDeviceCacheKey(changed),
+            "FAudio cache keys ignored a changed sample rate");
+        changed = requested;
+        changed.requested_channel_mode =
+            MusicPlayerLibrary::AudioChannelMode::Mono;
+        NATIVE_REQUIRE(
+            initial_key !=
+                MusicPlayerLibrary::MakeFAudioOutputDeviceCacheKey(changed),
+            "FAudio cache keys ignored a changed channel mode");
+        changed = requested;
+        changed.requested_bit_depth =
+            MusicPlayerLibrary::AudioBitDepth::Bit24;
+        NATIVE_REQUIRE(
+            initial_key !=
+                MusicPlayerLibrary::MakeFAudioOutputDeviceCacheKey(changed),
+            "FAudio cache keys ignored a changed bit depth");
+        changed = requested;
+        changed.requested_device_id.clear();
+        NATIVE_REQUIRE(
+            MusicPlayerLibrary::MakeFAudioOutputDeviceCacheKey(changed).empty(),
+            "the dynamic default FAudio device was made cacheable");
+
+        MusicPlayerLibrary::SharedAudioDeviceCache<FakeOutputDevice> cache(
+            "test cache was shut down");
+        std::uint64_t next_identity = 0;
+        const auto acquire = [&](const std::string& key)
+        {
+            return cache.Acquire(
+                key,
+                [&]
+                {
+                    return std::make_shared<FakeOutputDevice>(
+                        FakeOutputDevice{++next_identity});
+                },
+                [](const FakeOutputDevice&) { return true; });
+        };
+
+        const auto first = acquire(initial_key);
+        const auto reused = acquire(initial_key);
+        NATIVE_REQUIRE(first == reused,
+            "an unchanged explicit device cache key was not reused");
+        cache.Clear();
+        const auto refreshed = acquire(initial_key);
+        NATIVE_REQUIRE(first != refreshed && first->identity == 1 &&
+                refreshed->identity == 2,
+            "runtime cache invalidation did not create a freshly probed device");
+        NATIVE_REQUIRE(first->identity == 1,
+            "runtime cache invalidation destroyed a device still owned by a sink");
+
+        const auto dynamic_default_first = acquire({});
+        const auto dynamic_default_second = acquire({});
+        NATIVE_REQUIRE(dynamic_default_first != dynamic_default_second,
+            "the dynamic default device was unexpectedly cached");
+
+        cache.Shutdown();
+        bool rejected_after_shutdown = false;
+        try
+        {
+            (void)acquire(initial_key);
+        }
+        catch (const std::logic_error&)
+        {
+            rejected_after_shutdown = true;
+        }
+        NATIVE_REQUIRE(rejected_after_shutdown,
+            "permanent cache shutdown allowed a later device acquisition");
+    }
+
     void TestSinkPreGainIsAppliedInsideDsp()
     {
         constexpr std::uint32_t SampleRate = 48000;
@@ -3187,51 +3275,74 @@ namespace
 
 	void TestWasapiExclusiveProbeFallbacksAndWireVariants()
 	{
-		AudioOutputFormat requested{};
-		requested.requested_sample_rate = 96'000;
-		requested.requested_channel_mode =
-			MusicPlayerLibrary::AudioChannelMode::Surround51;
-		requested.requested_bit_depth =
-			MusicPlayerLibrary::AudioBitDepth::Bit32;
-
 		AudioOutputFormat preferred_request{};
 		preferred_request.requested_sample_rate = 48'000;
 		preferred_request.requested_channel_mode =
 			MusicPlayerLibrary::AudioChannelMode::Stereo;
 		preferred_request.requested_bit_depth =
-			MusicPlayerLibrary::AudioBitDepth::Bit32;
+			MusicPlayerLibrary::AudioBitDepth::Bit24;
 		const auto preferred = MusicPlayerLibrary::ResolveAudioOutputFormat(
 			preferred_request, MusicPlayerLibrary::MakeFallbackAudioWaveFormat());
-		const auto axes = MusicPlayerLibrary::BuildWasapiExclusiveProbeAxes(
-			requested, preferred);
+		const auto axes =
+			MusicPlayerLibrary::BuildWasapiExclusiveProbeAxes(preferred);
 
+		const std::vector expected_sample_rates{
+			48'000, 44'100, 22'050, 16'000, 11'025, 8'000 };
 		NATIVE_REQUIRE(
-			!axes.sample_rates.empty() && axes.sample_rates.front() == 96'000 &&
-			std::find(axes.sample_rates.begin(), axes.sample_rates.end(), 48'000) !=
-				axes.sample_rates.end() &&
-			std::find(axes.sample_rates.begin(), axes.sample_rates.end(), 44'100) !=
-				axes.sample_rates.end(),
-			"an explicit WASAPI sample rate suppressed safe fallback rates");
+			axes.sample_rates == expected_sample_rates,
+			"WASAPI sample-rate probing did not start at the endpoint recommendation "
+			"and proceed downward");
+		const std::vector expected_channel_modes{
+			MusicPlayerLibrary::AudioChannelMode::System,
+			MusicPlayerLibrary::AudioChannelMode::Stereo,
+			MusicPlayerLibrary::AudioChannelMode::Mono };
 		NATIVE_REQUIRE(
-			!axes.channel_modes.empty() && axes.channel_modes.front() ==
-				MusicPlayerLibrary::AudioChannelMode::Surround51 &&
-			std::find(
-				axes.channel_modes.begin(), axes.channel_modes.end(),
-				MusicPlayerLibrary::AudioChannelMode::Stereo) !=
-				axes.channel_modes.end(),
-			"an explicit WASAPI channel mode suppressed the stereo fallback");
+			axes.channel_modes == expected_channel_modes,
+			"WASAPI channel probing did not start at the endpoint recommendation "
+			"and proceed downward");
+		const std::vector expected_bit_depths{
+			MusicPlayerLibrary::AudioBitDepth::Bit24,
+			MusicPlayerLibrary::AudioBitDepth::Bit16 };
 		NATIVE_REQUIRE(
-			!axes.bit_depths.empty() && axes.bit_depths.front() ==
-				MusicPlayerLibrary::AudioBitDepth::Bit32 &&
-			std::find(
-				axes.bit_depths.begin(), axes.bit_depths.end(),
-				MusicPlayerLibrary::AudioBitDepth::Bit24) !=
-				axes.bit_depths.end() &&
-			std::find(
-				axes.bit_depths.begin(), axes.bit_depths.end(),
-				MusicPlayerLibrary::AudioBitDepth::Bit16) !=
-				axes.bit_depths.end(),
-			"an explicit WASAPI bit depth suppressed integer PCM fallbacks");
+			axes.bit_depths == expected_bit_depths,
+			"WASAPI bit-depth probing did not start at the endpoint recommendation "
+			"and proceed downward");
+
+		auto alternate_surround_format = MakeFloatFormat(96'000, 6);
+		alternate_surround_format.dwChannelMask = SPEAKER_5POINT1;
+		AudioOutputFormat system_request{};
+		const auto alternate_surround =
+			MusicPlayerLibrary::ResolveAudioOutputFormat(
+				system_request, alternate_surround_format);
+		const auto alternate_axes =
+			MusicPlayerLibrary::BuildWasapiExclusiveProbeAxes(
+				alternate_surround);
+		const std::vector expected_alternate_channel_modes{
+			MusicPlayerLibrary::AudioChannelMode::System,
+			MusicPlayerLibrary::AudioChannelMode::Surround51,
+			MusicPlayerLibrary::AudioChannelMode::Stereo,
+			MusicPlayerLibrary::AudioChannelMode::Mono };
+		NATIVE_REQUIRE(
+			alternate_axes.channel_modes == expected_alternate_channel_modes,
+			"WASAPI fallback probing did not retain the endpoint's alternate "
+			"channel layout before standard downward fallbacks");
+
+		auto unsupported_quad_format = MakeFloatFormat(48'000, 4);
+		unsupported_quad_format.dwChannelMask = SPEAKER_QUAD;
+		const auto unsupported_quad =
+			MusicPlayerLibrary::ResolveAudioOutputFormat(
+				system_request, unsupported_quad_format);
+		NATIVE_REQUIRE(
+			MusicPlayerLibrary::GetAudioChannelTypeId(
+				unsupported_quad.channel_count,
+				unsupported_quad.channel_mask) ==
+				static_cast<int>(MusicPlayerLibrary::AudioChannelMode::Unknown) &&
+			!MusicPlayerLibrary::IsSerializableAudioOutputFormat(
+				unsupported_quad),
+			"WASAPI accepted an endpoint layout that managed settings cannot persist");
+		NATIVE_REQUIRE(
+			MusicPlayerLibrary::IsSerializableAudioOutputFormat(preferred),
+			"WASAPI rejected a serializable stereo endpoint recommendation");
 
 		AudioOutputFormat pcm16_request = preferred_request;
 		pcm16_request.requested_bit_depth =
@@ -3265,7 +3376,13 @@ namespace
 				surround, invalid_legacy),
 			"a multichannel WASAPI descriptor was downgraded to legacy WAVEFORMATEX");
 
-		const auto pcm32 = MusicPlayerLibrary::MakeWasapiPcm32Variant(preferred);
+		AudioOutputFormat float_request = preferred_request;
+		float_request.requested_bit_depth =
+			MusicPlayerLibrary::AudioBitDepth::Bit32;
+		const auto float_preferred = MusicPlayerLibrary::ResolveAudioOutputFormat(
+			float_request, MusicPlayerLibrary::MakeFallbackAudioWaveFormat());
+		const auto pcm32 =
+			MusicPlayerLibrary::MakeWasapiPcm32Variant(float_preferred);
 		NATIVE_REQUIRE(
 			pcm32.bit_depth == MusicPlayerLibrary::AudioBitDepth::Bit32 &&
 			pcm32.sample_format == AV_SAMPLE_FMT_S32 &&
@@ -3273,7 +3390,7 @@ namespace
 				pcm32.wave_format.SubFormat,
 				MusicPlayerLibrary::PcmAudioSubFormat) &&
 			!MusicPlayerLibrary::AreWasapiWireFormatsEqual(
-				MusicPlayerLibrary::ToWindowsWaveFormatExtensible(preferred),
+				MusicPlayerLibrary::ToWindowsWaveFormatExtensible(float_preferred),
 				MusicPlayerLibrary::ToWindowsWaveFormatExtensible(pcm32)),
 			"integer PCM32 and float32 WASAPI descriptors collapsed together");
 	}
@@ -3435,6 +3552,7 @@ namespace
     NATIVE_TEST_CASE("format", "explicit PCM24 mapping and frame bytes", TestExplicit24BitAudioOutputFormatMapping)
     NATIVE_TEST_CASE("format", "System device mapping", TestSystemAudioOutputFormatMapping)
     NATIVE_TEST_CASE("format", "System PCM24 mapping and frame bytes", TestSystem24BitPcmOutputFormatMapping)
+    NATIVE_TEST_CASE("audio device cache", "format keys and runtime invalidation", TestAudioDeviceCacheKeysAndRuntimeInvalidation)
     NATIVE_TEST_CASE("format", "aresample accepts mappings", TestAresampleAcceptsOutputFormats)
     NATIVE_TEST_CASE("fft", "fixed 48 kHz S16 stereo resampling", TestFftResamplesToLegacyFormat)
     NATIVE_TEST_CASE("fft", "PCM24 FIFO and resampling frame bytes", Test24BitFifoAndFftFrameSizing)
@@ -3455,7 +3573,7 @@ namespace
 	NATIVE_TEST_CASE("wasapi clock", "two slow windows request recovery", TestWasapiClockHealthRequiresTwoSlowWindows)
 	NATIVE_TEST_CASE("wasapi clock", "reset clears slow history", TestWasapiClockHealthResetClearsSlowHistory)
 	NATIVE_TEST_CASE("wasapi format", "endpoint mix conversion", TestWasapiMixFormatConversion)
-	NATIVE_TEST_CASE("wasapi format", "explicit requests retain fallbacks and wire variants", TestWasapiExclusiveProbeFallbacksAndWireVariants)
+	NATIVE_TEST_CASE("wasapi format", "device recommendation probes downward with wire variants", TestWasapiExclusiveProbeFallbacksAndWireVariants)
 	NATIVE_TEST_CASE("wasapi format", "signed PCM32 conversion", TestPcm32IntegerConversion)
     NATIVE_TEST_CASE("lrc parser", "timestamp fractions normalize", TestLrcTimestampFractionNormalization)
     NATIVE_TEST_CASE("lrc parser", "progress delimiters parse", TestLrcProgressDelimiterParsing)

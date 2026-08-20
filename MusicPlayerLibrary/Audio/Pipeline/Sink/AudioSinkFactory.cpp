@@ -32,6 +32,8 @@ namespace MusicPlayerLibrary
 					"warn: WASAPI exclusive initialization failed; "
 					"falling back to shared FAudio: %s\n",
 					exception.what());
+				// WASAPI format discovery intentionally ignores these configured
+				// values, but shared FAudio still owns their fallback semantics.
 				AudioOutputFormat fallback = requested;
 				fallback.requested_backend = AudioBackend::FAudio;
 				return std::make_shared<FAudioSink>(fallback);

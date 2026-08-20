@@ -15,6 +15,7 @@ using WpfMusicPlayer.Helpers;
 using WpfMusicPlayer.Models;
 using WpfMusicPlayer.Services.Abstractions;
 using static WpfMusicPlayer.Models.ConfigData;
+using ConfigWriteError = WpfMusicPlayer.Services.Implementations.ConfigProvider.ErrorCode;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using Microsoft.Extensions.Logging;
@@ -24,6 +25,11 @@ namespace WpfMusicPlayer.ViewModels;
 public enum ActiveView { Player, Playlist, Settings }
 
 public enum PlayMode { Sequential, ListLoop, SingleLoop, Shuffle }
+
+public readonly record struct AudioPipelineReinitializationResult(
+    bool Succeeded,
+    bool WasapiFallback,
+    Exception? Error = null);
 
 public partial class MainViewModel : ObservableObject, IDisposable
 {
@@ -44,17 +50,25 @@ public partial class MainViewModel : ObservableObject, IDisposable
     private string? _currentFilePath;
     private string? _currentMd5;
     private int _sampleRate;
-    private readonly AudioSettings.ChannelType _channelMode;
-    private readonly AudioSettings.BitDepthType _bitDepth;
-    private readonly AudioSettings.BackendType _audioBackend;
-    private readonly string _outputDeviceId;
-    private readonly int _resolvedDeviceSampleRate;
+    private AudioSettings.ChannelType _channelMode;
+    private AudioSettings.BitDepthType _bitDepth;
+    private AudioSettings.BackendType _audioBackend;
+    private string _outputDeviceId;
+    private int _resolvedDeviceSampleRate;
+    private readonly SemaphoreSlim _audioPipelineReinitializationLock = new(1, 1);
+    private readonly CancellationTokenSource _lifetimeCancellation = new();
+    private int _audioPipelineReinitializationRequestCount;
+    private int _wasapiDeviceChangeRevision;
+    private int _wasapiDeviceChangeWorkerRunning;
+    private Task? _wasapiDeviceChangeTask;
+    private bool _hasPendingWasapiFallbackWarning;
     private bool _enableAutoPlay;
     private float? _pendingSeekTime;
     private readonly GCLatencyMode _previousLatencyMode;
     private bool _isRestoredFromCommandLine;
     private bool _disableAutoAdvance;
     private bool _playCountIncrementedForCurrentSong;
+    private bool _isShuttingDown;
     private bool _isDisposed;
     private int _albumArtVersion;
     private readonly ILogger<MainViewModel> _logger;
@@ -121,9 +135,18 @@ public partial class MainViewModel : ObservableObject, IDisposable
         PendingBitDepth = _bitDepth;
         PendingAudioBackend = _audioBackend;
         PendingOutputDeviceId = _outputDeviceId;
-        _musicPlayer = CreateMusicPlayer();
-        _resolvedDeviceSampleRate = _musicPlayer.GetDeviceOutputSampleRate();
+        var startupAudioConfiguration = AudioConfiguration.From(startupConfig.Audio);
+        var startupDeviceChangeRevision =
+            MusicPlayerManaged.GetAudioOutputDeviceChangeRevision();
+        _musicPlayer = CreateMusicPlayer(startupAudioConfiguration);
+        SubscribeAudioOutputDeviceEvents(_musicPlayer);
+        var startupFallback = ApplyResolvedAudioConfiguration(
+            _musicPlayer,
+            startupAudioConfiguration,
+            persistWasapiResult: IsWasapiBackend(startupAudioConfiguration.Backend));
+        _hasPendingWasapiFallbackWarning = startupFallback;
         UpdateEqualizerSampleRate(_sampleRate);
+        QueueMissedWasapiDeviceChange(startupDeviceChangeRevision);
         
         var info = Assembly
             .GetExecutingAssembly()
@@ -143,13 +166,132 @@ public partial class MainViewModel : ObservableObject, IDisposable
             _audioBackend, _outputDeviceId, _sampleRate, _channelMode, _bitDepth);
     }
 
-    private MusicPlayerManaged CreateMusicPlayer() =>
+    private static MusicPlayerManaged CreateMusicPlayer(
+        AudioConfiguration configuration) =>
         new(
-            _sampleRate,
-            (int)_channelMode,
-            (int)_bitDepth,
-            (int)_audioBackend,
-            _outputDeviceId);
+            configuration.SampleRate,
+            (int)configuration.Channel,
+            (int)configuration.BitDepth,
+            (int)configuration.Backend,
+            configuration.OutputDeviceId);
+
+    private readonly record struct AudioConfiguration(
+        AudioSettings.BackendType Backend,
+        string OutputDeviceId,
+        int SampleRate,
+        AudioSettings.ChannelType Channel,
+        AudioSettings.BitDepthType BitDepth)
+    {
+        public static AudioConfiguration From(AudioSettings settings) =>
+            new(
+                settings.Backend,
+                settings.OutputDeviceId ?? string.Empty,
+                settings.SampleRate,
+                settings.Channel,
+                settings.BitDepth);
+    }
+
+    private static bool IsWasapiBackend(AudioSettings.BackendType backend)
+    {
+#if WINDOWS
+        return backend == AudioSettings.BackendType.WasapiExclusive;
+#else
+        return false;
+#endif
+    }
+
+    private bool ApplyResolvedAudioConfiguration(
+        MusicPlayerManaged player,
+        AudioConfiguration requested,
+        bool persistWasapiResult)
+    {
+        var activeBackend = (AudioSettings.BackendType)player.GetActiveAudioBackend();
+        if (!Enum.IsDefined(activeBackend))
+            throw new InvalidOperationException($"音频后端返回了无效的类型：{(int)activeBackend}");
+
+        var wasapiFallback = IsWasapiBackend(requested.Backend) &&
+            !IsWasapiBackend(activeBackend);
+        // An empty ID deliberately means "follow the system default" and must
+        // remain empty after resolution. For an explicit ID, use the sink's
+        // normalized value so a stale FAudio/WASAPI selection is cleared when
+        // the backend has actually fallen back to its default endpoint.
+        var activeOutputDeviceId = requested.OutputDeviceId.Length == 0
+            ? string.Empty
+            : player.GetActiveOutputDeviceId() ?? string.Empty;
+        var applied = requested with
+        {
+            Backend = activeBackend,
+            OutputDeviceId = activeOutputDeviceId
+        };
+        if (IsWasapiBackend(activeBackend))
+        {
+            var sampleRate = player.GetDeviceOutputSampleRate();
+            var channel = (AudioSettings.ChannelType)player.GetDeviceOutputChannelType();
+            var bitDepth = (AudioSettings.BitDepthType)player.GetDeviceOutputBitDepth();
+            if (sampleRate <= 0 ||
+                !Enum.IsDefined(channel) || channel == AudioSettings.ChannelType.System ||
+                !Enum.IsDefined(bitDepth) || bitDepth == AudioSettings.BitDepthType.System)
+            {
+                throw new InvalidOperationException("WASAPI 返回了无效的协商输出格式");
+            }
+
+            applied = applied with
+            {
+                SampleRate = sampleRate,
+                Channel = channel,
+                BitDepth = bitDepth
+            };
+        }
+
+        _audioBackend = applied.Backend;
+        _outputDeviceId = applied.OutputDeviceId;
+        _sampleRate = applied.SampleRate;
+        _channelMode = applied.Channel;
+        _bitDepth = applied.BitDepth;
+        _resolvedDeviceSampleRate = player.GetDeviceOutputSampleRate();
+
+        ref var config = ref _configProvider.GetConfig();
+        var configChanged = config.Audio.Backend != applied.Backend ||
+            !string.Equals(
+                config.Audio.OutputDeviceId,
+                applied.OutputDeviceId,
+                StringComparison.OrdinalIgnoreCase) ||
+            config.Audio.SampleRate != applied.SampleRate ||
+            config.Audio.Channel != applied.Channel ||
+            config.Audio.BitDepth != applied.BitDepth;
+        config.Audio.Backend = applied.Backend;
+        config.Audio.OutputDeviceId = applied.OutputDeviceId;
+        config.Audio.SampleRate = applied.SampleRate;
+        config.Audio.Channel = applied.Channel;
+        config.Audio.BitDepth = applied.BitDepth;
+
+        // WASAPI's negotiated format is authoritative. Persist it even if the
+        // serialized values already happen to match so the file and live sink
+        // are committed as one initialization transaction.
+        if (persistWasapiResult || configChanged)
+            PersistAudioConfiguration("applying the resolved audio pipeline");
+
+        Settings.SynchronizeAudioSettings(config.Audio);
+        PendingAudioBackend = applied.Backend;
+        PendingOutputDeviceId = applied.OutputDeviceId;
+        PendingSampleRate = applied.SampleRate;
+        PendingChannelMode = applied.Channel;
+        PendingBitDepth = applied.BitDepth;
+        NotifyAudioSettingsApplyStateChanged();
+        return wasapiFallback;
+    }
+
+    private void PersistAudioConfiguration(string operation)
+    {
+        var result = _configProvider.WriteFile();
+        if (result != ConfigWriteError.NoError)
+        {
+            _logger.LogError(
+                "Unable to persist audio configuration while {Operation}: {ErrorCode}",
+                operation,
+                result);
+        }
+    }
 
     internal static int ResolveEqualizerSampleRate(
         AudioSettings.BackendType backend,
@@ -423,6 +565,12 @@ public partial class MainViewModel : ObservableObject, IDisposable
     [ObservableProperty]
     public partial ActiveView ActiveView { get; set; }
 
+    partial void OnActiveViewChanged(ActiveView value)
+    {
+        if (value == ActiveView.Settings)
+            Settings.RefreshOutputDevices();
+    }
+
     public string Version { get; }
 
     public string CommitId { get; }
@@ -434,6 +582,9 @@ public partial class MainViewModel : ObservableObject, IDisposable
 
     [ObservableProperty]
     public partial UISettings.BackgroundMode CurrentBackgroundMode { get; private set; }
+
+    [ObservableProperty]
+    public partial bool IsAudioPipelineReinitializing { get; private set; }
 
     [ObservableProperty]
     public partial int PendingSampleRate { get; private set; }
@@ -450,40 +601,40 @@ public partial class MainViewModel : ObservableObject, IDisposable
     [ObservableProperty]
     public partial string PendingOutputDeviceId { get; private set; } = string.Empty;
 
-    public bool IsSampleRateRestartRequired => PendingSampleRate != _sampleRate;
+    public bool IsSampleRateApplyRequired => PendingSampleRate != _sampleRate;
 
-    public bool IsChannelModeRestartRequired => PendingChannelMode != _channelMode;
+    public bool IsChannelModeApplyRequired => PendingChannelMode != _channelMode;
 
-    public bool IsBitDepthRestartRequired => PendingBitDepth != _bitDepth;
+    public bool IsBitDepthApplyRequired => PendingBitDepth != _bitDepth;
 
-    public bool IsAudioBackendRestartRequired => PendingAudioBackend != _audioBackend;
+    public bool IsAudioBackendApplyRequired => PendingAudioBackend != _audioBackend;
 
-    public bool IsOutputDeviceRestartRequired => !string.Equals(
+    public bool IsOutputDeviceApplyRequired => !string.Equals(
         PendingOutputDeviceId,
         _outputDeviceId,
         StringComparison.OrdinalIgnoreCase);
 
-    public bool IsAudioSettingsRestartRequired =>
-        IsAudioBackendRestartRequired ||
-        IsOutputDeviceRestartRequired ||
-        IsSampleRateRestartRequired ||
-        IsChannelModeRestartRequired ||
-        IsBitDepthRestartRequired;
+    public bool IsAudioSettingsApplyRequired =>
+        IsAudioBackendApplyRequired ||
+        IsOutputDeviceApplyRequired ||
+        IsSampleRateApplyRequired ||
+        IsChannelModeApplyRequired ||
+        IsBitDepthApplyRequired;
 
     public string PendingAudioSettingsSummary
     {
         get
         {
             List<string> changes = [];
-            if (IsAudioBackendRestartRequired)
+            if (IsAudioBackendApplyRequired)
                 changes.Add($"音频后端：{FormatAudioBackend(PendingAudioBackend)}");
-            if (IsOutputDeviceRestartRequired)
+            if (IsOutputDeviceApplyRequired)
                 changes.Add($"输出设备：{Settings.GetOutputDeviceDisplayName(PendingOutputDeviceId)}");
-            if (IsSampleRateRestartRequired)
+            if (IsSampleRateApplyRequired)
                 changes.Add($"采样率：{MusicPlayerManaged.FormatAudioSampleRate(PendingSampleRate)}");
-            if (IsChannelModeRestartRequired)
+            if (IsChannelModeApplyRequired)
                 changes.Add($"声道：{MusicPlayerManaged.FormatAudioChannelType((int)PendingChannelMode)}");
-            if (IsBitDepthRestartRequired)
+            if (IsBitDepthApplyRequired)
                 changes.Add($"位宽：{MusicPlayerManaged.FormatAudioBitDepth((int)PendingBitDepth)}");
             return string.Join("\n", changes.Select(change => $"• {change}"));
         }
@@ -531,14 +682,37 @@ public partial class MainViewModel : ObservableObject, IDisposable
     {
         // 避免对_musicPlayer的重复析构
         _logger.LogInformation("Attempting to acquire OpenFile lock");
-        await _openFileLock.WaitAsync().ConfigureAwait(false);
+        await _openFileLock.WaitAsync(_lifetimeCancellation.Token)
+            .ConfigureAwait(false);
+        try
+        {
+            await OpenFileCoreAsync(filePath, _lifetimeCancellation.Token)
+                .ConfigureAwait(false);
+        }
+        finally
+        {
+            _openFileLock.Release();
+        }
+    }
+
+    private async Task OpenFileCoreAsync(
+        string filePath,
+        CancellationToken cancellationToken = default)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
         var player = _musicPlayer;
         int loadVersion;
+        float? initialSeekTime;
+        bool autoPlay;
         lock (_playerStateLock)
         {
             loadVersion = Interlocked.Increment(ref _albumArtVersion);
             _activeLoadContext = null;
             _disableAutoAdvance = true;
+            initialSeekTime = _pendingSeekTime;
+            _pendingSeekTime = null;
+            autoPlay = _enableAutoPlay;
+            _enableAutoPlay = false;
         }
 
         try
@@ -578,6 +752,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
                 _logger.LogInformation("NCM file detected, starting decode: {FilePath}", filePath);
 
             var md5 = await ComputeFileMd5Async(filePath).ConfigureAwait(false);
+            cancellationToken.ThrowIfCancellationRequested();
             _logger.LogInformation("File MD5 computed: {Md5}", md5);
 
             var cached = _songDatabase.FindByMd5(md5);
@@ -587,7 +762,13 @@ public partial class MainViewModel : ObservableObject, IDisposable
                 _logger.LogInformation("Cached album art hit for {Md5}; native album art loading will be skipped", md5);
             }
 
-            var loadContext = new PlayerLoadContext(loadVersion, filePath, md5, cached?.AlbumArt);
+            var loadContext = new PlayerLoadContext(
+                loadVersion,
+                filePath,
+                md5,
+                cached?.AlbumArt,
+                initialSeekTime,
+                autoPlay);
             lock (_playerStateLock)
             {
                 if (loadVersion != Volatile.Read(ref _albumArtVersion))
@@ -602,7 +783,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
                 player.OpenFile(filePath, skipAlbumArtLoading);
             }
 
-            if (!_enableAutoPlay)
+            if (!loadContext.AutoPlay)
             {
                 _syncContext.Post(_ => PlayPauseContent = PlayString, null);
             }
@@ -611,10 +792,6 @@ public partial class MainViewModel : ObservableObject, IDisposable
         {
             ResetPlayerToUnloadedState(loadVersion);
             throw;
-        }
-        finally
-        {
-            _openFileLock.Release();
         }
     }
 
@@ -628,6 +805,8 @@ public partial class MainViewModel : ObservableObject, IDisposable
             }
             catch (Exception ex)
             {
+                if (_isDisposed || ex is OperationCanceledException)
+                    return;
                 _logger.LogError(ex, "Failed to open file {FilePath}", filePath);
                 _syncContext.Post(_ =>
                 {
@@ -702,30 +881,28 @@ public partial class MainViewModel : ObservableObject, IDisposable
             PendingSampleRate = config.Audio.SampleRate;
             PendingChannelMode = config.Audio.Channel;
             PendingBitDepth = config.Audio.BitDepth;
-            UpdateEqualizerSampleRate(PendingSampleRate);
-            NotifyAudioSettingsRestartStateChanged();
+            NotifyAudioSettingsApplyStateChanged();
             return;
         }
 
         if (e.SettingName == nameof(SettingsViewModel.SelectedSampleRate))
         {
             PendingSampleRate = _configProvider.GetConfig().Audio.SampleRate;
-            UpdateEqualizerSampleRate(PendingSampleRate);
-            NotifyAudioSettingsRestartStateChanged();
+            NotifyAudioSettingsApplyStateChanged();
             return;
         }
 
         if (e.SettingName == nameof(SettingsViewModel.SelectedChannel))
         {
             PendingChannelMode = _configProvider.GetConfig().Audio.Channel;
-            NotifyAudioSettingsRestartStateChanged();
+            NotifyAudioSettingsApplyStateChanged();
             return;
         }
 
         if (e.SettingName == nameof(SettingsViewModel.SelectedBitDepth))
         {
             PendingBitDepth = _configProvider.GetConfig().Audio.BitDepth;
-            NotifyAudioSettingsRestartStateChanged();
+            NotifyAudioSettingsApplyStateChanged();
             return;
         }
 
@@ -733,19 +910,404 @@ public partial class MainViewModel : ObservableObject, IDisposable
         {
             PendingOutputDeviceId =
                 _configProvider.GetConfig().Audio.OutputDeviceId ?? string.Empty;
-            NotifyAudioSettingsRestartStateChanged();
+            NotifyAudioSettingsApplyStateChanged();
         }
     }
 
-    private void NotifyAudioSettingsRestartStateChanged()
+    private void NotifyAudioSettingsApplyStateChanged()
     {
-        OnPropertyChanged(nameof(IsAudioBackendRestartRequired));
-        OnPropertyChanged(nameof(IsOutputDeviceRestartRequired));
-        OnPropertyChanged(nameof(IsSampleRateRestartRequired));
-        OnPropertyChanged(nameof(IsChannelModeRestartRequired));
-        OnPropertyChanged(nameof(IsBitDepthRestartRequired));
-        OnPropertyChanged(nameof(IsAudioSettingsRestartRequired));
+        OnPropertyChanged(nameof(IsAudioBackendApplyRequired));
+        OnPropertyChanged(nameof(IsOutputDeviceApplyRequired));
+        OnPropertyChanged(nameof(IsSampleRateApplyRequired));
+        OnPropertyChanged(nameof(IsChannelModeApplyRequired));
+        OnPropertyChanged(nameof(IsBitDepthApplyRequired));
+        OnPropertyChanged(nameof(IsAudioSettingsApplyRequired));
         OnPropertyChanged(nameof(PendingAudioSettingsSummary));
+    }
+
+    public event Action? WasapiFallbackOccurred;
+
+    public event Action<Exception>? AudioPipelineReinitializationFailed;
+
+    public bool ConsumePendingWasapiFallbackWarning()
+    {
+        if (!_hasPendingWasapiFallbackWarning)
+            return false;
+        _hasPendingWasapiFallbackWarning = false;
+        return true;
+    }
+
+    public void DiscardPendingAudioSettings()
+    {
+        ref var config = ref _configProvider.GetConfig();
+        config.Audio.Backend = _audioBackend;
+        config.Audio.OutputDeviceId = _outputDeviceId;
+        config.Audio.SampleRate = _sampleRate;
+        config.Audio.Channel = _channelMode;
+        config.Audio.BitDepth = _bitDepth;
+        PersistAudioConfiguration("discarding pending audio settings");
+        Settings.SynchronizeAudioSettings(config.Audio);
+        PendingAudioBackend = _audioBackend;
+        PendingOutputDeviceId = _outputDeviceId;
+        PendingSampleRate = _sampleRate;
+        PendingChannelMode = _channelMode;
+        PendingBitDepth = _bitDepth;
+        NotifyAudioSettingsApplyStateChanged();
+    }
+
+    public Task<AudioPipelineReinitializationResult> ReinitializeAudioPipelineAsync() =>
+        ReinitializeAudioPipelineAsync(
+            AudioConfiguration.From(_configProvider.GetConfig().Audio),
+            _lifetimeCancellation.Token);
+
+    private AudioConfiguration GetAppliedAudioConfiguration() =>
+        new(
+            _audioBackend,
+            _outputDeviceId,
+            _sampleRate,
+            _channelMode,
+            _bitDepth);
+
+    private async Task<AudioPipelineReinitializationResult>
+        ReinitializeAudioPipelineAsync(
+            AudioConfiguration? requested,
+            CancellationToken cancellationToken,
+            bool requireActiveWasapi = false)
+    {
+        if (Interlocked.Increment(
+                ref _audioPipelineReinitializationRequestCount) == 1)
+            IsAudioPipelineReinitializing = true;
+
+        var reinitializationLockAcquired = false;
+        var openFileLockAcquired = false;
+        try
+        {
+            await _audioPipelineReinitializationLock.WaitAsync(cancellationToken);
+            reinitializationLockAcquired = true;
+            await _openFileLock.WaitAsync(cancellationToken);
+            openFileLockAcquired = true;
+            if (requireActiveWasapi)
+            {
+                if (!IsWasapiBackend(_audioBackend))
+                    return new AudioPipelineReinitializationResult(true, false);
+                requested = GetAppliedAudioConfiguration();
+            }
+            if (requested is null)
+                throw new InvalidOperationException(
+                    "No audio configuration was supplied for pipeline reinitialization");
+            return await ReinitializeAudioPipelineCoreAsync(
+                requested.Value,
+                cancellationToken);
+        }
+        catch (OperationCanceledException exception)
+        {
+            return new AudioPipelineReinitializationResult(false, false, exception);
+        }
+        catch (Exception exception)
+        {
+            _logger.LogError(exception, "Audio-pipeline reinitialization failed");
+            return new AudioPipelineReinitializationResult(false, false, exception);
+        }
+        finally
+        {
+            if (openFileLockAcquired)
+                _openFileLock.Release();
+            if (reinitializationLockAcquired)
+                _audioPipelineReinitializationLock.Release();
+            if (Interlocked.Decrement(
+                    ref _audioPipelineReinitializationRequestCount) == 0)
+                IsAudioPipelineReinitializing = false;
+        }
+    }
+
+    private async Task<AudioPipelineReinitializationResult>
+        ReinitializeAudioPipelineCoreAsync(
+            AudioConfiguration requested,
+            CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        var deviceChangeRevision =
+            MusicPlayerManaged.GetAudioOutputDeviceChangeRevision();
+        var previous = GetAppliedAudioConfiguration();
+        var oldPlayer = _musicPlayer;
+        var activeLoadContext = _activeLoadContext;
+        var filePath = activeLoadContext?.FilePath ?? _currentFilePath;
+        var oldPlayerInitialized = false;
+        var resumePlayback = activeLoadContext?.AutoPlay ?? false;
+        var playbackPosition = (double)(activeLoadContext?.InitialSeekTime ?? 0.0f);
+        try
+        {
+            oldPlayerInitialized = oldPlayer.IsInitialized();
+            // Before FileInit commits, native initialization may already report
+            // true even though the context's initial seek/start has not run yet.
+            // In that window the per-load snapshot is the authoritative state.
+            if (oldPlayerInitialized && activeLoadContext?.IsCommitted != false)
+            {
+                resumePlayback = oldPlayer.IsPlaying();
+                playbackPosition = oldPlayer.GetCurrentMusicPosition();
+            }
+        }
+        catch (Exception exception)
+        {
+            _logger.LogWarning(
+                exception,
+                "Unable to query the old player state before audio-pipeline reinitialization");
+        }
+        var restoreFile = !string.IsNullOrWhiteSpace(filePath) &&
+            (activeLoadContext is not null || oldPlayerInitialized);
+
+        lock (_playerStateLock)
+        {
+            Interlocked.Increment(ref _albumArtVersion);
+            _activeLoadContext = null;
+            _disableAutoAdvance = true;
+        }
+
+        MusicPlayerManaged? replacement = null;
+        var oldPlayerDisposed = false;
+        try
+        {
+            if (oldPlayerInitialized)
+                oldPlayer.Stop();
+            oldPlayer.CloseFile();
+            oldPlayer.Dispose();
+            oldPlayerDisposed = true;
+
+            // Device objects are deliberately shared between normal player
+            // instances. A settings/backend transition is a hard boundary: the
+            // old mastering voice and any stale WASAPI negotiation must not
+            // survive into the replacement pipeline.
+            MusicPlayerManaged.InvalidateAudioOutputDeviceCaches();
+            cancellationToken.ThrowIfCancellationRequested();
+            replacement = CreateMusicPlayer(requested);
+            SubscribeAudioOutputDeviceEvents(replacement);
+            _musicPlayer = replacement;
+
+            var wasapiFallback = ApplyResolvedAudioConfiguration(
+                replacement,
+                requested,
+                persistWasapiResult: IsWasapiBackend(requested.Backend));
+            UpdateEqualizerSampleRate(_sampleRate);
+            ApplyEqualizerSettingsToPlayer(replacement);
+            replacement.SetMasterVolume((float)Volume);
+
+            if (restoreFile)
+            {
+                _pendingSeekTime = (float)Math.Max(0.0, playbackPosition);
+                _enableAutoPlay = resumePlayback;
+                await OpenFileCoreAsync(filePath!, cancellationToken);
+            }
+            else
+            {
+                _enableAutoPlay = false;
+            }
+
+            QueueMissedWasapiDeviceChange(deviceChangeRevision);
+
+            _logger.LogInformation(
+                "Audio pipeline reinitialized: requested backend {RequestedBackend}, active backend {ActiveBackend}, output {OutputFormat}",
+                requested.Backend,
+                _audioBackend,
+                replacement.GetDeviceOutputFormat());
+            return new AudioPipelineReinitializationResult(true, wasapiFallback);
+        }
+        catch (Exception exception)
+        {
+            _logger.LogError(
+                exception,
+                "Failed to reinitialize the audio pipeline for backend {AudioBackend}",
+                requested.Backend);
+            if (_isDisposed || cancellationToken.IsCancellationRequested)
+                return new AudioPipelineReinitializationResult(false, false, exception);
+            try
+            {
+                if (!oldPlayerDisposed)
+                {
+                    oldPlayer.Dispose();
+                    oldPlayerDisposed = true;
+                }
+                if (replacement is not null)
+                {
+                    replacement.Dispose();
+                    replacement = null;
+                }
+
+                MusicPlayerManaged.InvalidateAudioOutputDeviceCaches();
+                var recoveredPlayer = CreateMusicPlayer(previous);
+                SubscribeAudioOutputDeviceEvents(recoveredPlayer);
+                _musicPlayer = recoveredPlayer;
+                var recoveryFallback = ApplyResolvedAudioConfiguration(
+                    recoveredPlayer,
+                    previous,
+                    persistWasapiResult: IsWasapiBackend(previous.Backend));
+                UpdateEqualizerSampleRate(_sampleRate);
+                ApplyEqualizerSettingsToPlayer(recoveredPlayer);
+                recoveredPlayer.SetMasterVolume((float)Volume);
+                if (restoreFile)
+                {
+                    _pendingSeekTime = (float)Math.Max(0.0, playbackPosition);
+                    _enableAutoPlay = resumePlayback;
+                    await OpenFileCoreAsync(filePath!, cancellationToken);
+                }
+                if (recoveryFallback)
+                    ReportWasapiFallback();
+                QueueMissedWasapiDeviceChange(deviceChangeRevision);
+            }
+            catch (Exception recoveryException)
+            {
+                _logger.LogCritical(
+                    recoveryException,
+                    "Failed to restore the previous audio pipeline after reinitialization failure");
+            }
+            return new AudioPipelineReinitializationResult(false, false, exception);
+        }
+    }
+
+    private void SubscribeAudioOutputDeviceEvents(MusicPlayerManaged player)
+    {
+#if WINDOWS
+        player.OnAudioOutputDeviceChanged = () =>
+            OnAudioOutputDeviceChanged(player);
+#endif
+    }
+
+    private void OnAudioOutputDeviceChanged(MusicPlayerManaged sourcePlayer)
+    {
+#if WINDOWS
+        if (_isDisposed || _isShuttingDown ||
+            !ReferenceEquals(sourcePlayer, _musicPlayer) ||
+            !IsWasapiBackend(_audioBackend))
+            return;
+
+        Interlocked.Increment(ref _wasapiDeviceChangeRevision);
+        QueueWasapiDeviceChangeWorker();
+#endif
+    }
+
+    private void QueueMissedWasapiDeviceChange(ulong previousRevision)
+    {
+#if WINDOWS
+        if (_isDisposed || _isShuttingDown ||
+            !IsWasapiBackend(_audioBackend) ||
+            MusicPlayerManaged.GetAudioOutputDeviceChangeRevision() ==
+                previousRevision)
+        {
+            return;
+        }
+
+        Interlocked.Increment(ref _wasapiDeviceChangeRevision);
+        QueueWasapiDeviceChangeWorker();
+#endif
+    }
+
+    private void QueueWasapiDeviceChangeWorker()
+    {
+#if WINDOWS
+        if (_isDisposed || _isShuttingDown ||
+            Interlocked.CompareExchange(
+                ref _wasapiDeviceChangeWorkerRunning, 1, 0) != 0)
+        {
+            return;
+        }
+
+        _syncContext.Post(_ =>
+        {
+            if (_isDisposed || _isShuttingDown)
+            {
+                Interlocked.Exchange(ref _wasapiDeviceChangeWorkerRunning, 0);
+                return;
+            }
+
+            _wasapiDeviceChangeTask = ProcessWasapiDeviceChangesAsync(
+                _lifetimeCancellation.Token);
+        }, null);
+#endif
+    }
+
+    private async Task ProcessWasapiDeviceChangesAsync(
+        CancellationToken cancellationToken)
+    {
+#if WINDOWS
+        var processedRevision = 0;
+        try
+        {
+            while (!cancellationToken.IsCancellationRequested)
+            {
+                // Windows may emit a short burst (property, state, default and
+                // collection notifications) for one physical change.
+                await Task.Delay(250, cancellationToken);
+                var targetRevision = Volatile.Read(
+                    ref _wasapiDeviceChangeRevision);
+                if (_isDisposed || !IsWasapiBackend(_audioBackend))
+                {
+                    processedRevision = targetRevision;
+                    break;
+                }
+
+                // WpfMessageBox runs a nested Dispatcher frame. A device event
+                // can resume here while an audio-settings confirmation is still
+                // open. Preserve the revision until that draft is either applied
+                // or discarded, otherwise rebuilding the old configuration would
+                // overwrite the values shown in the confirmation dialog.
+                if (IsAudioSettingsApplyRequired)
+                    continue;
+
+                var result = await ReinitializeAudioPipelineAsync(
+                    requested: null,
+                    cancellationToken: cancellationToken,
+                    requireActiveWasapi: true);
+                if (_isDisposed || cancellationToken.IsCancellationRequested)
+                    break;
+
+                Settings.RefreshOutputDevices();
+                if (result.WasapiFallback)
+                    ReportWasapiFallback();
+                if (!result.Succeeded && result.Error is not null &&
+                    result.Error is not OperationCanceledException)
+                {
+                    AudioPipelineReinitializationFailed?.Invoke(result.Error);
+                }
+
+                processedRevision = targetRevision;
+                if (Volatile.Read(ref _wasapiDeviceChangeRevision) ==
+                    processedRevision)
+                {
+                    break;
+                }
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            // Application shutdown cancels the debounce/rebuild task.
+        }
+        catch (Exception exception)
+        {
+            _logger.LogError(
+                exception,
+                "Unhandled error while processing WASAPI device changes");
+            if (!_isDisposed)
+                AudioPipelineReinitializationFailed?.Invoke(exception);
+        }
+        finally
+        {
+            Interlocked.Exchange(ref _wasapiDeviceChangeWorkerRunning, 0);
+            if (!_isDisposed && !cancellationToken.IsCancellationRequested &&
+                Volatile.Read(ref _wasapiDeviceChangeRevision) != processedRevision)
+            {
+                QueueWasapiDeviceChangeWorker();
+            }
+        }
+#endif
+    }
+
+    private void ReportWasapiFallback()
+    {
+        if (WasapiFallbackOccurred is null)
+        {
+            _hasPendingWasapiFallbackWarning = true;
+            return;
+        }
+        WasapiFallbackOccurred.Invoke();
     }
 
     public void PollSpectrumData()
@@ -777,27 +1339,63 @@ public partial class MainViewModel : ObservableObject, IDisposable
         _spectrumBufferHasData = true;
     }
 
+    public async Task DisposeAsync()
+    {
+        if (_isDisposed || _isShuttingDown)
+            return;
+
+        _isShuttingDown = true;
+        _lifetimeCancellation.Cancel();
+        await _audioPipelineReinitializationLock.WaitAsync();
+        try
+        {
+            await _openFileLock.WaitAsync();
+            try
+            {
+                DisposeCore();
+            }
+            finally
+            {
+                _openFileLock.Release();
+            }
+        }
+        finally
+        {
+            _audioPipelineReinitializationLock.Release();
+        }
+    }
+
     public void Dispose()
     {
-        if (!_isDisposed)
-        {
-            _logger.LogInformation("MainViewModel disposing, releasing resources");
-            Settings.SettingChanged -= OnSettingChanged;
-            Playlist.PlaySongRequested -= OnPlaylistSongRequested;
-            Playlist.ResetPlaylistRequested -= OnPlaylistResetRequested;
-            Lyrics.SeekRequested -= OnLyricsSeekRequested;
-            Lyrics.UpdateCurrentLyricRequested -= OnLyricsUpdateDatabaseRequested;
-            Lyrics.UpdateCurrentLyricOffsetRequested -= OnLyricsUpdateOffsetMsRequired;
-            GCSettings.LatencyMode = _previousLatencyMode;
-            _musicPlayer.Dispose();
-            Interlocked.Increment(ref _albumArtVersion);
-            _logger.LogInformation("MusicPlayer disposed");
-            _songDatabase.Dispose();
-            _logger.LogInformation("SongDatabase disposed");
-            GC.SuppressFinalize(this);
-        }
+        if (_isDisposed)
+            return;
+        _isShuttingDown = true;
+        _lifetimeCancellation.Cancel();
+        DisposeCore();
+    }
 
+    private void DisposeCore()
+    {
+        if (_isDisposed)
+            return;
         _isDisposed = true;
+        _logger.LogInformation("MainViewModel disposing, releasing resources");
+        Settings.SettingChanged -= OnSettingChanged;
+        Playlist.PlaySongRequested -= OnPlaylistSongRequested;
+        Playlist.ResetPlaylistRequested -= OnPlaylistResetRequested;
+        Lyrics.SeekRequested -= OnLyricsSeekRequested;
+        Lyrics.UpdateCurrentLyricRequested -= OnLyricsUpdateDatabaseRequested;
+        Lyrics.UpdateCurrentLyricOffsetRequested -= OnLyricsUpdateOffsetMsRequired;
+        GCSettings.LatencyMode = _previousLatencyMode;
+#if WINDOWS
+        _musicPlayer.OnAudioOutputDeviceChanged = null;
+#endif
+        _musicPlayer.Dispose();
+        Interlocked.Increment(ref _albumArtVersion);
+        _logger.LogInformation("MusicPlayer disposed");
+        _songDatabase.Dispose();
+        _logger.LogInformation("SongDatabase disposed");
+        GC.SuppressFinalize(this);
     }
 
     public Task SetSampleRate(int sampleRate)
@@ -808,12 +1406,11 @@ public partial class MainViewModel : ObservableObject, IDisposable
             throw new ArgumentOutOfRangeException(nameof(sampleRate), "Sample rate must be between 8000 and 192000 Hz.");
         }
         _logger.LogInformation(
-            "Sample rate change queued for restart: {OldRate} -> {NewRate}",
+            "Sample rate change queued for audio-pipeline reinitialization: {OldRate} -> {NewRate}",
             _sampleRate,
             sampleRate);
         PendingSampleRate = sampleRate;
-        UpdateEqualizerSampleRate(sampleRate);
-        NotifyAudioSettingsRestartStateChanged();
+        NotifyAudioSettingsApplyStateChanged();
         return Task.CompletedTask;
     }
 
@@ -923,11 +1520,10 @@ public partial class MainViewModel : ObservableObject, IDisposable
 
                 var offsetMs = cached?.CustomLyricOffsetMs ?? 0;
                 _logger.LogInformation("OnFileInit: custom lyric offset: {OffsetMs}ms", offsetMs);
-                float curSeekTime = _pendingSeekTime ?? 0.0f;
-                if (_pendingSeekTime is not null)
+                float curSeekTime = loadContext.InitialSeekTime ?? 0.0f;
+                if (loadContext.InitialSeekTime is not null)
                 {
                     _logger.LogInformation("OnFileInit: applying pending seek to {SeekTime}s", curSeekTime);
-                    _pendingSeekTime = null;
                     player.SeekToPosition(curSeekTime, true);
                     ProgressValue = curSeekTime;
                     CurrentTime = FormatTime(curSeekTime);
@@ -946,7 +1542,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
                         Lyrics.UpdateLyricProgress(curSeekTime);
                     }, TaskScheduler.FromCurrentSynchronizationContext())
                     .ConfigureAwait(false);
-                if (_enableAutoPlay)
+                if (loadContext.AutoPlay)
                     player.Start();
             }
             catch (Exception ex)
@@ -1092,10 +1688,9 @@ public partial class MainViewModel : ObservableObject, IDisposable
         _syncContext.Post(_ =>
         {
             if (!IsCurrentLoad(player, loadContext)) return;
-			IsBitPerfect = isBitPerfect;
+            IsBitPerfect = isBitPerfect;
             PlayPauseContent = PauseString;
             _smtcService.UpdatePlaybackStatus(PlaybackState.Playing);
-            _enableAutoPlay = false;
         }, null);
     }
 
@@ -1777,12 +2372,16 @@ public partial class MainViewModel : ObservableObject, IDisposable
         int version,
         string filePath,
         string md5,
-        byte[]? albumArtPng)
+        byte[]? albumArtPng,
+        float? initialSeekTime,
+        bool autoPlay)
     {
         public int Version { get; } = version;
         public string FilePath { get; } = filePath;
         public string Md5 { get; } = md5;
         public byte[]? AlbumArtPng { get; set; } = albumArtPng;
+        public float? InitialSeekTime { get; } = initialSeekTime;
+        public bool AutoPlay { get; } = autoPlay;
         public bool IsCommitted { get; set; }
     }
 }

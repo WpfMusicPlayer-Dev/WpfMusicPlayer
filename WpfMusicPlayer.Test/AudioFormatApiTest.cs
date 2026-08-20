@@ -40,4 +40,31 @@ public sealed class AudioFormatApiTest
             player.GetDeviceOutputFormat());
         Assert.AreEqual(192_000, player.GetDeviceOutputSampleRate());
     }
+
+#if WINDOWS
+    [TestMethod]
+    [DoNotParallelize]
+    public void WasapiInitializationFailure_FAudioFallbackRetainsConfiguredFormat()
+    {
+        const int wasapiExclusiveBackend = 1;
+        const int configuredSampleRate = 88_200;
+        using var player = new MusicPlayerManaged(
+            configuredSampleRate,
+            1,
+            16,
+            wasapiExclusiveBackend,
+            $"missing-wasapi-endpoint-{Guid.NewGuid():N}");
+
+        Assert.AreEqual(0, player.GetActiveAudioBackend());
+        Assert.AreEqual(string.Empty, player.GetActiveOutputDeviceId());
+        Assert.AreEqual(
+            "88.2 kHz / 16-bit / Mono",
+            player.GetDeviceOutputFormat());
+        Assert.AreEqual(
+            configuredSampleRate,
+            player.GetDeviceOutputSampleRate());
+        Assert.AreEqual(1, player.GetDeviceOutputChannelType());
+        Assert.AreEqual(16, player.GetDeviceOutputBitDepth());
+    }
+#endif
 }

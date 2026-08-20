@@ -12,6 +12,12 @@
 
 namespace MusicPlayerLibrary
 {
+	// Explicit devices may be cached, but the mastering voice geometry is also
+	// determined by the requested source format. The dynamic default deliberately
+	// returns an empty key so it is resolved afresh on every acquisition.
+	[[nodiscard]] std::string MakeFAudioOutputDeviceCacheKey(
+		const AudioOutputFormat& requested);
+
 	class FAudioOutputDevice final
 	{
 		UniqueFAudio engine_;
@@ -35,6 +41,8 @@ namespace MusicPlayerLibrary
 		// Releases the application-lifetime cache. Existing sinks retain their
 		// shared reference until their source voices have been destroyed.
 		static void ShutdownShared() noexcept;
+		// Runtime invalidation keeps the cache usable for a later backend rebuild.
+		static void InvalidateShared() noexcept;
 		[[nodiscard]] FAudio* GetEngine() const noexcept { return engine_.get(); }
 		[[nodiscard]] const AudioOutputDeviceInfo& GetDeviceInfo() const noexcept
 		{
