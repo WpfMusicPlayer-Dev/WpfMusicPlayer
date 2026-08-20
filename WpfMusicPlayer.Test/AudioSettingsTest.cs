@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: MIT
 
 using System.Xml.Serialization;
+using System.Windows;
 using WpfMusicPlayer.Models;
 using WpfMusicPlayer.Services.Abstractions;
 using WpfMusicPlayer.Services.Implementations;
@@ -160,6 +161,7 @@ public sealed class SettingsViewModelTest
         viewModel.SelectedBackend = AudioSettings.BackendType.WasapiExclusive;
 
         Assert.IsFalse(viewModel.IsOutputFormatSelectionEnabled);
+        Assert.AreEqual(Visibility.Collapsed, viewModel.OutputFormatSettingsVisibility);
         Assert.AreEqual(1, configProvider.WriteCount);
         Assert.AreEqual(
             SettingsViewModel.AudioOutputSettingsChangeName,
@@ -184,6 +186,123 @@ public sealed class SettingsViewModelTest
         Assert.AreEqual(AudioSettings.BitDepthType.Bit24, persistedConfig.Audio.BitDepth);
     }
 
+    [TestMethod]
+    public void RefreshOutputDevices_ReenumeratesWithoutWritingAndPreservesStableId()
+    {
+        var config = CreateAudioConfig(
+            48_000,
+            AudioSettings.ChannelType.Stereo,
+            AudioSettings.BitDepthType.Bit24);
+        config.Audio.OutputDeviceId = "endpoint-b";
+        var configProvider = new FakeConfigProvider(config);
+        var audioOutputFormatProvider = new FakeAudioOutputFormatProvider(
+            new SystemAudioOutputFormat(
+                48_000,
+                AudioSettings.ChannelType.Stereo,
+                AudioSettings.BitDepthType.Bit24),
+            [new("endpoint-b", "USB DAC", false)]);
+        var viewModel = new SettingsViewModel(
+            configProvider,
+            audioOutputFormatProvider);
+        var eventCount = 0;
+        viewModel.SettingChanged += (_, _) => eventCount++;
+
+        audioOutputFormatProvider.OutputDevices =
+        [
+            new("endpoint-b", "USB DAC (renamed)", false),
+            new("endpoint-c", "HDMI", true)
+        ];
+        viewModel.RefreshOutputDevices();
+
+        Assert.AreEqual(2, audioOutputFormatProvider.DeviceQueryCount);
+        Assert.AreEqual("endpoint-b", viewModel.SelectedOutputDeviceId);
+        Assert.AreEqual("USB DAC (renamed)",
+            viewModel.GetOutputDeviceDisplayName("endpoint-b"));
+        Assert.AreEqual(0, configProvider.WriteCount);
+        Assert.AreEqual(0, eventCount);
+
+        audioOutputFormatProvider.OutputDevices =
+        [
+            new("endpoint-c", "HDMI", true)
+        ];
+        viewModel.RefreshOutputDevices();
+
+        Assert.AreEqual(3, audioOutputFormatProvider.DeviceQueryCount);
+        Assert.AreEqual("endpoint-b", viewModel.SelectedOutputDeviceId);
+        Assert.IsTrue(viewModel.OutputDeviceOptions.Any(option =>
+            option.Id == "endpoint-b" &&
+            option.DisplayName.Contains("当前不可用", StringComparison.Ordinal)));
+        Assert.AreEqual("endpoint-b", configProvider.GetConfig().Audio.OutputDeviceId);
+        Assert.AreEqual(0, configProvider.WriteCount);
+        Assert.AreEqual(0, eventCount);
+    }
+
+    [TestMethod]
+    public void SynchronizeAudioSettings_UpdatesUiWithoutWritingOrRaisingEvent()
+    {
+        var configProvider = new FakeConfigProvider(CreateAudioConfig(
+            48_000,
+            AudioSettings.ChannelType.Stereo,
+            AudioSettings.BitDepthType.Bit24));
+        var audioOutputFormatProvider = new FakeAudioOutputFormatProvider(
+            new SystemAudioOutputFormat(
+                48_000,
+                AudioSettings.ChannelType.Stereo,
+                AudioSettings.BitDepthType.Bit24),
+            [new("endpoint-b", "USB DAC", false)]);
+        var viewModel = new SettingsViewModel(
+            configProvider,
+            audioOutputFormatProvider);
+        var eventCount = 0;
+        viewModel.SettingChanged += (_, _) => eventCount++;
+        var negotiatedAudio = new AudioSettings
+        {
+            Backend = AudioSettings.BackendType.WasapiExclusive,
+            OutputDeviceId = "endpoint-b",
+            SampleRate = 176_400,
+            Channel = AudioSettings.ChannelType.Surround51,
+            BitDepth = AudioSettings.BitDepthType.Bit32
+        };
+
+        viewModel.SynchronizeAudioSettings(negotiatedAudio);
+
+        Assert.AreEqual(
+            AudioSettings.BackendType.WasapiExclusive,
+            viewModel.SelectedBackend);
+        Assert.AreEqual("endpoint-b", viewModel.SelectedOutputDeviceId);
+        Assert.AreEqual(negotiatedAudio.SampleRate, viewModel.SelectedSampleRate);
+        Assert.AreEqual(negotiatedAudio.Channel, viewModel.SelectedChannel);
+        Assert.AreEqual(negotiatedAudio.BitDepth, viewModel.SelectedBitDepth);
+        Assert.Contains(negotiatedAudio.SampleRate, viewModel.SampleRateOptions);
+        Assert.AreEqual(Visibility.Collapsed, viewModel.OutputFormatSettingsVisibility);
+        Assert.AreEqual(2, audioOutputFormatProvider.DeviceQueryCount);
+        Assert.AreEqual(
+            AudioSettings.BackendType.WasapiExclusive,
+            audioOutputFormatProvider.LastDeviceBackend);
+        Assert.AreEqual(0, configProvider.WriteCount);
+        Assert.AreEqual(0, eventCount);
+
+        var fallbackAudio = new AudioSettings
+        {
+            Backend = AudioSettings.BackendType.FAudio,
+            OutputDeviceId = string.Empty,
+            SampleRate = 48_000,
+            Channel = AudioSettings.ChannelType.Stereo,
+            BitDepth = AudioSettings.BitDepthType.Bit24
+        };
+
+        viewModel.SynchronizeAudioSettings(fallbackAudio);
+
+        Assert.AreEqual(AudioSettings.BackendType.FAudio, viewModel.SelectedBackend);
+        Assert.AreEqual(string.Empty, viewModel.SelectedOutputDeviceId);
+        Assert.AreEqual(Visibility.Visible, viewModel.OutputFormatSettingsVisibility);
+        Assert.AreEqual(3, audioOutputFormatProvider.DeviceQueryCount);
+        Assert.AreEqual(
+            AudioSettings.BackendType.FAudio,
+            audioOutputFormatProvider.LastDeviceBackend);
+        Assert.AreEqual(0, configProvider.WriteCount);
+        Assert.AreEqual(0, eventCount);
+    }
     [TestMethod]
     public void BackendChange_RefreshesDevicesAndKeepsAvailableStableId()
     {
@@ -495,9 +614,17 @@ internal sealed class FakeAudioOutputFormatProvider(
     IReadOnlyList<AudioOutputDeviceOption>? outputDevices = null)
     : IAudioOutputFormatProvider
 {
+    private IReadOnlyList<AudioOutputDeviceOption> _outputDevices =
+        outputDevices ?? [];
+
     public int QueryCount { get; private set; }
     public int DeviceQueryCount { get; private set; }
     public AudioSettings.BackendType? LastDeviceBackend { get; private set; }
+    public IReadOnlyList<AudioOutputDeviceOption> OutputDevices
+    {
+        get => _outputDevices;
+        set => _outputDevices = value;
+    }
 
     public SystemAudioOutputFormat GetSystemDefaultOutputFormat()
     {
@@ -510,7 +637,7 @@ internal sealed class FakeAudioOutputFormatProvider(
     {
         DeviceQueryCount++;
         LastDeviceBackend = backend;
-        return outputDevices ?? [];
+        return _outputDevices;
     }
 }
 

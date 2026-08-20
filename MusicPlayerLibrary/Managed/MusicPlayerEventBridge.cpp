@@ -51,4 +51,26 @@ namespace MusicPlayerLibrary
 
         managed_player->ProcessEvent(static_cast<int>(message.type), payload);
     }
+
+#if defined(_WIN32)
+    void MusicPlayerEventBridge::OnAudioOutputDeviceChanged() noexcept
+    {
+        try
+        {
+            Publish({PlayerMessageType::AudioOutputDeviceChanged});
+        }
+        catch (System::Exception^ exception)
+        {
+            System::Diagnostics::Trace::TraceError(
+                System::String::Concat(
+                    "Audio output device notification dispatch failed: ",
+                    exception->ToString()));
+        }
+        catch (...)
+        {
+            NATIVE_TRACE(
+                "warn: audio output device notification dispatch failed\n");
+        }
+    }
+#endif
 }

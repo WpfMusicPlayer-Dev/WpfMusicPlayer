@@ -37,22 +37,6 @@ namespace
 	MusicPlayerLibrary::SharedAudioDeviceCache<WasapiExclusiveOutputDevice>
 		SharedDeviceCache("WASAPI exclusive output device has already shut down");
 
-	std::string MakeDeviceCacheKey(const AudioOutputFormat& requested)
-	{
-		if (requested.requested_device_id.empty())
-			return {};
-		std::string result = requested.requested_device_id;
-		result.push_back('\0');
-		result.append(std::to_string(requested.requested_sample_rate));
-		result.push_back(':');
-		result.append(std::to_string(
-			static_cast<int>(requested.requested_channel_mode)));
-		result.push_back(':');
-		result.append(std::to_string(
-			static_cast<int>(requested.requested_bit_depth)));
-		return result;
-	}
-
 	Microsoft::WRL::ComPtr<IMMDeviceEnumerator> CreateDeviceEnumerator()
 	{
 		Microsoft::WRL::ComPtr<IMMDeviceEnumerator> result;
@@ -161,7 +145,6 @@ namespace
 
 	AudioOutputFormat ProbeExclusiveFormat(
 		IAudioClient* client,
-		const AudioOutputFormat& requested,
 		const std::string& endpoint_id)
 	{
 		if (!client)
@@ -187,18 +170,15 @@ namespace
 				"Unsupported endpoint mix format", E_INVALIDARG);
 		}
 
-		AudioOutputFormat normalized_request = requested;
+		AudioOutputFormat normalized_request{};
 		normalized_request.requested_backend = AudioBackend::WasapiExclusive;
 		normalized_request.requested_device_id = endpoint_id;
 		const auto preferred = MusicPlayerLibrary::ResolveAudioOutputFormat(
 			normalized_request, system_format);
 
 		NATIVE_TRACE(
-			"info: probing WASAPI exclusive formats: requested=%dHz/mode%d/%dbit, "
-			"endpoint-mix=%luHz/%uch/tag0x%04X/%ubit\n",
-			requested.requested_sample_rate,
-			static_cast<int>(requested.requested_channel_mode),
-			static_cast<int>(requested.requested_bit_depth),
+			"info: probing WASAPI exclusive formats from endpoint recommendation: "
+			"%luHz/%uch/tag0x%04X/%ubit\n",
 			static_cast<unsigned long>(system_format.Format.nSamplesPerSec),
 			static_cast<unsigned int>(system_format.Format.nChannels),
 			static_cast<unsigned int>(system_format.Format.wFormatTag),
@@ -247,6 +227,8 @@ namespace
 		const auto try_candidate_variants =
 			[&](const AudioOutputFormat& candidate) -> bool
 		{
+			if (!MusicPlayerLibrary::IsSerializableAudioOutputFormat(candidate))
+				return false;
 			if (try_candidate(candidate))
 			{
 				selected = candidate;
@@ -306,8 +288,8 @@ namespace
 		if (try_candidate_variants(preferred))
 			return return_selected();
 
-		const auto axes = MusicPlayerLibrary::BuildWasapiExclusiveProbeAxes(
-			requested, preferred);
+		const auto axes =
+			MusicPlayerLibrary::BuildWasapiExclusiveProbeAxes(preferred);
 		for (const int sample_rate : axes.sample_rates)
 		{
 			for (const AudioChannelMode channel_mode : axes.channel_modes)
@@ -359,8 +341,7 @@ MusicPlayerLibrary::WasapiExclusiveOutputDevice::WasapiExclusiveOutputDevice(
 		ThrowHResult("IAudioClient::GetDevicePeriod", period_status);
 	default_device_period_100ns_ = default_period;
 	minimum_device_period_100ns_ = minimum_period;
-	output_format_ = ProbeExclusiveFormat(
-		client.Get(), requested, device_info_.id);
+	output_format_ = ProbeExclusiveFormat(client.Get(), device_info_.id);
 }
 
 std::shared_ptr<MusicPlayerLibrary::WasapiExclusiveOutputDevice>
@@ -368,7 +349,7 @@ MusicPlayerLibrary::WasapiExclusiveOutputDevice::Acquire(
 	const AudioOutputFormat& requested)
 {
 	return SharedDeviceCache.Acquire(
-		MakeDeviceCacheKey(requested),
+		requested.requested_device_id,
 		[&requested]
 		{
 			return std::shared_ptr<WasapiExclusiveOutputDevice>(
@@ -412,6 +393,11 @@ MusicPlayerLibrary::WasapiExclusiveOutputDevice::EnumerateOutputDevices()
 void MusicPlayerLibrary::WasapiExclusiveOutputDevice::ShutdownShared() noexcept
 {
 	SharedDeviceCache.Shutdown();
+}
+
+void MusicPlayerLibrary::WasapiExclusiveOutputDevice::InvalidateShared() noexcept
+{
+	SharedDeviceCache.Clear();
 }
 
 MusicPlayerLibrary::AudioOutputFormat

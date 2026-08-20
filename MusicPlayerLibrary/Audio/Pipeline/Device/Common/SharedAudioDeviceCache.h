@@ -65,5 +65,18 @@ namespace MusicPlayerLibrary
 			}
 			released.clear();
 		}
+
+		// Drops only the cache's strong references. Existing sinks keep their
+		// devices alive through shared_ptr, while subsequent Acquire calls are
+		// allowed to create freshly probed devices.
+		void Clear() noexcept
+		{
+			decltype(devices_) released;
+			{
+				std::lock_guard lock(mutex_);
+				released.swap(devices_);
+			}
+			released.clear();
+		}
 	};
 }

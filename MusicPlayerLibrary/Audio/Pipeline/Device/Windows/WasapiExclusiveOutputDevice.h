@@ -36,6 +36,7 @@ namespace MusicPlayerLibrary
 		[[nodiscard]] static std::vector<AudioOutputDeviceInfo>
 			EnumerateOutputDevices();
 		static void ShutdownShared() noexcept;
+		static void InvalidateShared() noexcept;
 
 		[[nodiscard]] const AudioOutputFormat& GetOutputFormat() const noexcept
 		{

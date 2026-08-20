@@ -39,7 +39,7 @@ namespace WpfMusicPlayer
         private bool _isClosing;
         private bool _hasDesktopLyricStateBeforeMiniPlayer;
         private bool _wasDesktopLyricVisibleBeforeMiniPlayer;
-        private bool _isAudioSettingsRestartPromptOpen;
+        private bool _isAudioSettingsApplyPromptOpen;
         private UISettings.BackgroundMode _appliedBackgroundMode;
 
         public MainWindow(MainViewModel viewModel, ISmtcService smtcService)
@@ -60,6 +60,13 @@ namespace WpfMusicPlayer
             ViewModel.PropertyChanged += ViewModel_PropertyChanged;
             ViewModel.Lyrics.PropertyChanged += LyricsPropertyChanged;
             ViewModel.DesktopLyric.PropertyChanged += DesktopLyricPropertyChanged;
+            ViewModel.WasapiFallbackOccurred += ShowWasapiFallbackWarning;
+            ViewModel.AudioPipelineReinitializationFailed += ShowAudioPipelineError;
+            Loaded += (_, _) =>
+            {
+                if (ViewModel.ConsumePendingWasapiFallbackWarning())
+                    ShowWasapiFallbackWarning();
+            };
 
             // 从命令行恢复时，IsDesktopLyricVisible可能已经设置
             if (ViewModel.DesktopLyric.IsDesktopLyricVisible)
@@ -152,9 +159,15 @@ namespace WpfMusicPlayer
                 return;
             }
 
-            if (e.PropertyName == nameof(MainViewModel.IsAudioSettingsRestartRequired))
+            if (e.PropertyName == nameof(MainViewModel.IsAudioSettingsApplyRequired))
             {
-                PromptRestartForAudioSettingsChange();
+                PromptApplyAudioSettingsChange();
+                return;
+            }
+
+            if (e.PropertyName == nameof(MainViewModel.IsAudioPipelineReinitializing))
+            {
+                SettingsContent.IsEnabled = !ViewModel.IsAudioPipelineReinitializing;
                 return;
             }
 
@@ -184,29 +197,65 @@ namespace WpfMusicPlayer
             }
         }
 
-        private void PromptRestartForAudioSettingsChange()
+        private async void PromptApplyAudioSettingsChange()
         {
-            if (!ViewModel.IsAudioSettingsRestartRequired || _isAudioSettingsRestartPromptOpen)
+            if (!ViewModel.IsAudioSettingsApplyRequired || _isAudioSettingsApplyPromptOpen)
                 return;
 
-            _isAudioSettingsRestartPromptOpen = true;
+            _isAudioSettingsApplyPromptOpen = true;
             try
             {
                 var selection = WpfMessageBox.Show(
-                    $"以下音频设置将在重启后应用：\n{ViewModel.PendingAudioSettingsSummary}\n\n是否立即重启应用程序？",
+                    $"以下音频设置需要重新初始化音频管线：\n{ViewModel.PendingAudioSettingsSummary}\n\n是否立即应用？",
                     "应用音频设置",
                     WpfMessageBoxButton.OKCancel,
                     WpfMessageBoxIcon.Information);
 
                 if (selection == WpfMessageBoxResult.OK)
                 {
-                    RebootApplicationHelper.RebootApplication();
+                    var result = await ViewModel.ReinitializeAudioPipelineAsync();
+                    if (result.WasapiFallback && !_isClosing)
+                    {
+                        ShowWasapiFallbackWarning();
+                    }
+                    else if (!result.Succeeded && result.Error is not null &&
+                             result.Error is not OperationCanceledException &&
+                             !_isClosing)
+                    {
+                        ShowAudioPipelineError(result.Error);
+                    }
+                }
+                else
+                {
+                    ViewModel.DiscardPendingAudioSettings();
                 }
             }
             finally
             {
-                _isAudioSettingsRestartPromptOpen = false;
+                _isAudioSettingsApplyPromptOpen = false;
             }
+        }
+
+        private void ShowWasapiFallbackWarning()
+        {
+            if (_isClosing)
+                return;
+
+            WpfMessageBox.Show(
+                "WASAPI 独占模式初始化失败，已回退至 FAudio 共享模式。",
+                "WASAPI 初始化失败",
+                WpfMessageBoxIcon.Warning);
+        }
+
+        private void ShowAudioPipelineError(Exception exception)
+        {
+            if (_isClosing || exception is OperationCanceledException)
+                return;
+
+            WpfMessageBox.Show(
+                $"无法重新初始化音频管线。\n{exception.Message}",
+                "应用音频设置失败",
+                WpfMessageBoxIcon.Error);
         }
 
         private void LyricsPropertyChanged(object? sender, PropertyChangedEventArgs e)
@@ -284,40 +333,88 @@ namespace WpfMusicPlayer
         }
 
         private bool _closeConfirmed;
+        private bool _shutdownInProgress;
 
         private async void MainWindow_Closing(object sender, CancelEventArgs e)
         {
-            if (!_closeConfirmed && ViewModel.HasUnsavedPlaylistChanges)
-            {
-                var result = WpfMessageBox.Show(
-                    "播放列表有未保存的更改，是否保存？",
-                    "确认",
-                    WpfMessageBoxButton.YesNoCancel,
-                    WpfMessageBoxIcon.Question);
+            if (_closeConfirmed)
+                return;
 
-                switch (result)
+            e.Cancel = true;
+            if (_shutdownInProgress)
+                return;
+
+            _shutdownInProgress = true;
+            _isClosing = true;
+            var handlersDetached = false;
+            var shutdownUiApplied = false;
+            try
+            {
+                if (ViewModel.HasUnsavedPlaylistChanges)
                 {
-                    case WpfMessageBoxResult.Yes:
-                        await ViewModel.Playlist.SavePlaylistAsync();
-                        _closeConfirmed = true;
-                        break;
-                    case WpfMessageBoxResult.Cancel:
-                        e.Cancel = true;
-                        return;
+                    var result = WpfMessageBox.Show(
+                        "播放列表有未保存的更改，是否保存？",
+                        "确认",
+                        WpfMessageBoxButton.YesNoCancel,
+                        WpfMessageBoxIcon.Question);
+
+                    switch (result)
+                    {
+                        case WpfMessageBoxResult.Yes:
+                            await ViewModel.Playlist.SavePlaylistAsync();
+                            break;
+                        case WpfMessageBoxResult.Cancel:
+                            return;
+                    }
+                }
+
+                _spectrumTimer.Stop();
+                SettingsContent.IsEnabled = false;
+                shutdownUiApplied = true;
+                ViewModel.PropertyChanged -= ViewModel_PropertyChanged;
+                ViewModel.Lyrics.PropertyChanged -= LyricsPropertyChanged;
+                ViewModel.DesktopLyric.PropertyChanged -= DesktopLyricPropertyChanged;
+                ViewModel.WasapiFallbackOccurred -= ShowWasapiFallbackWarning;
+                ViewModel.AudioPipelineReinitializationFailed -= ShowAudioPipelineError;
+                handlersDetached = true;
+
+                await ViewModel.DisposeAsync();
+                _desktopLyricWindow?.Close();
+                _miniPlayerWindow?.Close();
+                _decodingDialog?.Close();
+                _decodingDialog = null;
+                _closeConfirmed = true;
+                e.Cancel = false;
+            }
+            catch (Exception exception)
+            {
+                WpfMessageBox.Show(
+                    $"应用程序无法安全关闭。\n{exception.Message}",
+                    "关闭失败",
+                    WpfMessageBoxIcon.Error);
+            }
+            finally
+            {
+                if (!_closeConfirmed)
+                {
+                    if (handlersDetached)
+                    {
+                        ViewModel.PropertyChanged += ViewModel_PropertyChanged;
+                        ViewModel.Lyrics.PropertyChanged += LyricsPropertyChanged;
+                        ViewModel.DesktopLyric.PropertyChanged += DesktopLyricPropertyChanged;
+                        ViewModel.WasapiFallbackOccurred += ShowWasapiFallbackWarning;
+                        ViewModel.AudioPipelineReinitializationFailed += ShowAudioPipelineError;
+                    }
+                    if (shutdownUiApplied)
+                    {
+                        SettingsContent.IsEnabled =
+                            !ViewModel.IsAudioPipelineReinitializing;
+                        _spectrumTimer.Start();
+                    }
+                    _isClosing = false;
+                    _shutdownInProgress = false;
                 }
             }
-
-            _spectrumTimer.Stop();
-            _isClosing = true;
-            ViewModel.PropertyChanged -= ViewModel_PropertyChanged;
-            ViewModel.Lyrics.PropertyChanged -= LyricsPropertyChanged;
-            ViewModel.DesktopLyric.PropertyChanged -= DesktopLyricPropertyChanged;
-            _desktopLyricWindow?.Close();
-            _miniPlayerWindow?.Close();
-            _decodingDialog?.Close();
-            _decodingDialog = null;
-            ViewModel.OnWindowClosed();
-            ViewModel.Dispose();
         }
 
         private async void MainWindow_Drop(object sender, DragEventArgs e)
