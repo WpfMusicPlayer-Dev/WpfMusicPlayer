@@ -4,7 +4,6 @@
 </div>
 
 [![zread](https://img.shields.io/badge/Ask_Zread-_.svg?style=for-the-badge&color=00b0aa&labelColor=000000&logo=data%3Aimage%2Fsvg%2Bxml%3Bbase64%2CPHN2ZyB3aWR0aD0iMTYiIGhlaWdodD0iMTYiIHZpZXdCb3g9IjAgMCAxNiAxNiIgZmlsbD0ibm9uZSIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj4KPHBhdGggZD0iTTQuOTYxNTYgMS42MDAxSDIuMjQxNTZDMS44ODgxIDEuNjAwMSAxLjYwMTU2IDEuODg2NjQgMS42MDE1NiAyLjI0MDFWNC45NjAxQzEuNjAxNTYgNS4zMTM1NiAxLjg4ODEgNS42MDAxIDIuMjQxNTYgNS42MDAxSDQuOTYxNTZDNS4zMTUwMiA1LjYwMDEgNS42MDE1NiA1LjMxMzU2IDUuNjAxNTYgNC45NjAxVjIuMjQwMUM1LjYwMTU2IDEuODg2NjQgNS4zMTUwMiAxLjYwMDEgNC45NjE1NiAxLjYwMDFaIiBmaWxsPSIjZmZmIi8%2BCjxwYXRoIGQ9Ik00Ljk2MTU2IDEwLjM5OTlIMi4yNDE1NkMxLjg4ODEgMTAuMzk5OSAxLjYwMTU2IDEwLjY4NjQgMS42MDE1NiAxMS4wMzk5VjEzLjc1OTlDMS42MDE1NiAxNC4xMTM0IDEuODg4MSAxNC4zOTk5IDIuMjQxNTYgMTQuMzk5OUg0Ljk2MTU2QzUuMzE1MDIgMTQuMzk5OSA1LjYwMTU2IDE0LjExMzQgNS42MDE1NiAxMy43NTk5VjExLjAzOTlDNS42MDE1NiAxMC42ODY0IDUuMzE1MDIgMTAuMzk5OSA0Ljk2MTU2IDEwLjM5OTlaIiBmaWxsPSIjZmZmIi8%2BCjxwYXRoIGQ9Ik0xMy43NTg0IDEuNjAwMUgxMS4wMzg0QzEwLjY4NSAxLjYwMDEgMTAuMzk4NCAxLjg4NjY0IDEwLjM5ODQgMi4yNDAxVjQuOTYwMUMxMC4zOTg0IDUuMzEzNTYgMTAuNjg1IDUuNjAwMSAxMS4wMzg0IDUuNjAwMUgxMy43NTg0QzE0LjExMTkgNS42MDAxIDE0LjM5ODQgNS4zMTM1NiAxNC4zOTg0IDQuOTYwMVYyLjI0MDFDMTQuMzk4NCAxLjg4NjY0IDE0LjExMTkgMS42MDAxIDEzLjc1ODQgMS42MDAxWiIgZmlsbD0iI2ZmZiIvPgo8cGF0aCBkPSJNNCAxMkwxMiA0TDQgMTJaIiBmaWxsPSIjZmZmIi8%2BCjxwYXRoIGQ9Ik00IDEyTDEyIDQiIHN0cm9rZT0iI2ZmZiIgc3Ryb2tlLXdpZHRoPSIxLjUiIHN0cm9rZS1saW5lY2FwPSJyb3VuZCIvPgo8L3N2Zz4K&logoColor=ffffff)](https://zread.ai/WpfMusicPlayer-Dev/WpfMusicPlayer)
-![Telegram](https://telegram-badge.vercel.app/api/telegram-badge?channelId=@MadokawaiiChat&style=for-the-badge)
 ![FFmpeg](https://img.shields.io/badge/FFmpeg-8.1.2-yellow?style=for-the-badge&logo=ffmpeg)
 ![Build System](https://img.shields.io/badge/Build%20System-MSBuild-blueviolet?style=for-the-badge&logo=data:image/svg+xml;base64,PD94bWwgdmVyc2lvbj0iMS4wIiBzdGFuZGFsb25lPSJubyI/PjwhRE9DVFlQRSBzdmcgUFVCTElDICItLy9XM0MvL0RURCBTVkcgMS4xLy9FTiIgImh0dHA6Ly93d3cudzMub3JnL0dyYXBoaWNzL1NWRy8xLjEvRFREL3N2ZzExLmR0ZCI+PHN2ZyB0PSIxNzI4MTA5NjA3MzUyIiBjbGFzcz0iaWNvbiIgdmlld0JveD0iMCAwIDEwMjQgMTAyNCIgdmVyc2lvbj0iMS4xIiB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHAtaWQ9IjYxMjAiIHhtbG5zOnhsaW5rPSJodHRwOi8vd3d3LnczLm9yZy8xOTk5L3hsaW5rIiB3aWR0aD0iMjQiIGhlaWdodD0iMjQiPjxwYXRoIGQ9Ik03MTguOTMzMzMzIDg1LjMzMzMzM0wzODcuODQgNDE2Ljg1MzMzM2wtMjA5LjA2NjY2Ny0xNjQuNjkzMzMzTDg3LjQ2NjY2NyAyOTguNjY2NjY3djQyNi42NjY2NjZsOTEuNzMzMzMzIDQ2LjUwNjY2NyAyMTAuMzQ2NjY3LTE2NC4yNjY2NjdMNzE5Ljc4NjY2NyA5MzguNjY2NjY3IDkzOC42NjY2NjcgODUwLjM0NjY2N1YxNzAuNjY2NjY3ek0xODYuNDUzMzMzIDYxMC4xMzMzMzNWNDExLjczMzMzM2wxMDQuMTA2NjY3IDEwMy42OHogbTUyNi4wOCA1NS4wNEw1MTQuMTMzMzMzIDUxMmwxOTguNC0xNTMuMTczMzMzeiIgcC1pZD0iNjEyMSIgZmlsbD0iI2ZmZmZmZiI+PC9wYXRoPjwvc3ZnPg==)
 ![GitHub top language](https://img.shields.io/github/languages/top/WpfMusicPlayer-Dev/WpfMusicPlayer?style=for-the-badge)
@@ -15,28 +14,24 @@
 ![GitHub Actions Workflow Status](https://img.shields.io/github/actions/workflow/status/WpfMusicPlayer-Dev/WpfMusicPlayer/dotnet-desktop.yml?style=for-the-badge)
 [![State-of-the-art Shitcode](https://img.shields.io/static/v1?label=State-of-the-art&message=Shitcode&color=7B5804&style=for-the-badge)](https://github.com/trekhleb/state-of-the-art-shitcode)
 
-A simple music player, focused on audio pipeline and lyric experience.
+A simple music player, focused on audio pipeline, lyric, and Windows experience.
 
-## Notice
-- This project has entered maintenance mode.
-- All planned TODO items and future feature development will be carried out in a new project.
-- No further functional updates will be made to this repository, but bug fixes will continue to be accepted.
-- New project will remove all windows dependencies, and become cross-platform deployable.
+相比于其他播放器功能缺的太多，要品鉴的慎用
 
 ## Technical stack
 - **Frontend:** WPF / C#  
-- **Backend:** Standard C++, C++/CLI wrapper isolated inside `MusicPlayerNative/Managed`
+- **Backend:** C++ 20 / CLI
 - **Native Libraries:** FFmpeg, FAudio, OpenSSL, RapidJSON, cpp-base64, kissfft, uchardet, libiconv, NCNN, doctest(for native unittest)
 - **Framework:** .NET 10.0 (Long Term Support)  
 - **Minimum Supported Windows Version:** Windows 10 2004 (build 10.0.19041.0)  
-- **Target Windows Version:** Windows Latest (build 10.0.26100.0)
+- **Target Windows Version:** Windows 11 24H2 (build 10.0.26100.0)
 
 ## Screenshot
 
 ### JPN lyric, CHS translation and Romaji romanization enabled
 ![screenshot-1](screenshots/screenshot-1.png)
 
-### CHS lyric, Jyutping romanization enabled
+### CHT lyric, Jyutping romanization enabled
 ![screenshot-2](screenshots/screenshot-2.png)
 
 ### ENG lyric, CHS translation enabled
@@ -68,17 +63,19 @@ A simple music player, focused on audio pipeline and lyric experience.
 - Playing times record & display
 - Playlist support (.wppl format, in standard JSON)
 - Lyric Intermediate JSON format, fully editor-compatible and high accuracy
+- ARM64 Native solutions & executable
 
 Still work in progress. 3rd party libraries are managed by vcpkg.
 
 ## TODO List:
 - [ ] UI Refractor (UI, from @Baicaiye)
-- [x] remove C++/CLI, rewrite `MusicPlayerLibary` to pure C++ implementation
-- [x] isolate neseccary Windows API Calls, write cross-platform alternatives
-- [ ] Migrating to Avalonia, extend platform support to Linux / macOS
-- [x] PcmProvider / PcmSubmitter / PcmObserver refractor, plugable, preemptive rewrite
-- [ ] Extract `MusicPlayerLibrary` into an audio middleware
+- [ ] Online 3rd Party Music Streaming API Support
+- [ ] Hi-Fi DSD format support, Compact Disc/HDCD Support, Stricter Bit-Perfect judgement
+- [ ] Localization Support (this requires WPLRC v3 schema)
+- [ ] Music Library management, M3U8 playlist import/export, CUE track split
+- [ ] Lyric search API support, Lyric editor integration, WPLRC edit and LRC import/export
 - You can submit your ideas in issues, or contact me directly by email.
+- 去你妈的跨平台谁爱做谁做。这个项目就是个人偏执的产物，不爱用就滚去用其他播放器。
 
 ## How to build?
 You can download the latest build from Github CI/CD, but if you want to build by yourself, follow the instruction below.
@@ -111,21 +108,22 @@ powercfg -attributes SUB_PROCESSOR bae08b81-2d5e-4688-ad6a-13243356654b -ATTRIB_
 > <br>
 > `Heterogeneous short running thread scheduling policy` -> `Prefer performant processors`
 5. Copy the built DLLs from x64(ARM64)/Debug(Release) to the same folder as the built executable.
-6. Enjoy!
+6. Now you can launch the main executable.
 - Notice: if your audio output sample rate is configured below 44100 Hz, some equalizer band will be disabled, preventing the introduction of high-frequency noise.
 - This behavior complies with the Nyquist-Shannon sampling theorem.
 
 ## How to contribute?
 1. Write a clear issue
 2. Fork the repository, create your new fix/feature, then PR
-3. Donate to [爱发电](https://afdian.com/a/lucas150670)
 
 ## 对中国大陆用户：
 您可以通过 [GitCode 镜像](https://gitcode.com/lucas150670/WpfMusicPlayer) 访问本项目。
+- 看得见这个的应该不需要这条吧？要不下次删了
 
 ## About Intermediate Lyric Format (WPLRC v2)
 - See: [WPLRC.scheme.md](WPLRC.scheme.md).
 - Or you can use the online version: [English](https://lucas150670.com/blog/wplrc-schema-en/), [简体中文](https://lucas150670.com/blog/wplrc-schema-zh-cn/)
+- WPLRC v3 work in progress.
 
 ## Icon Copyright Notice
 - File path: `WpfMusicPlayer/Assets/ApplicationIcon.ico`
@@ -170,35 +168,17 @@ The upstream source code remains under the **MIT License**, and contributors may
 Only the **specific binary distribution** that links against GPL‑configured FFmpeg is subject to GPL requirements.
 
 ### LGPL compliance notice
-When distributing builds that statically link FFmpeg under LGPL mode, you must ensure end users
-can relink the application with a modified version of FFmpeg. This can be achieved by either:
-
-- Providing application object files (excluding FFmpeg) so users can relink, or
-- Publishing the full source code of this project under MIT, which allows users to rebuild with
-  their own FFmpeg version.
-
-FFmpeg source code is available at https://ffmpeg.org.  
-The LGPL license text is included in LICENSE.thirdparty.txt.
+这一坨东西不可能静态链接，所以没有加这个的必要，当然你闲的太无聊真搞出了静态链接的版本，那记得把obj文件公开一下
 
 ## Get in touched with author:
 - Email: lucas150670@petalmail.com
-- Telegram Group: https://t.me/MadokawaiiChat
 
 ## Credit
 Thanks to all the contributors of this project:
 - [Zopiclone](https://github.com/Zopiclone-main), code
 - [steve84966](https://github.com/steve84966), code
 - [白菜叶](https://github.com/bai-caiye), UI/UX and logo art
-- [大川爱麒麟](https://github.com/DachuanKirin), test
-- and you, who are willing to try using this application.
-
-> From [ffmpeg_xaudio2](https://github.com/lucas8485/ffmpeg_xaudio2) pure CLI demo, to [MFCMusicPlayer](https://github.com/lucas150670/MFCMusicPlayer), then WpfMusicPlayer.
-> <br>
-> This is an incredible journey with your support.
-> <br>
-> Let's meet at the next station, Avalonia,
-> with all platform support, richer user interface,
-> native i18n support, and brand new WPLRC v3 format,
-> which fully preserves the semantic information of the lyric.
-> <br>
-> Thank you!
+- [大川爱麒麟](https://github.com/DachuanKirin), smoke test
+- [国家超算互联网中心](https://www.scnet.cn/home/subject/maas/index.html?utm_campaign=2608MaaSPromo&utm_source=banner&_channel_track_key=AXJWlYov) for cheap AI credit
+- [Kimi K3 & Kimi Code](https://www.kimi.ai/)
+- 以上排名不分先后
