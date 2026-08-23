@@ -268,15 +268,15 @@ namespace WpfMusicPlayer
                 Dispatcher.BeginInvoke(delegate
                 {
                     if (ViewModel.Lyrics.CurrentLyricIndex < 0) return;
-                    ScrollLyricToCenter(_isPortrait ? PortraitLyricsView.LyricsList : LandscapeLyricsView.LyricsList, index);
+                    ScrollLyricToCenter(_isPortrait ? PortraitLyricsView : LandscapeLyricsView, index);
                 }, DispatcherPriority.Loaded);
                 return;
             }
 
             if (e.PropertyName != nameof(LyricsViewModel.CurrentLyricIndex)) return;
 
-            ScrollLyricToCenter(LandscapeLyricsView.LyricsList, index);
-            ScrollLyricToCenter(PortraitLyricsView.LyricsList, index);
+            ScrollLyricToCenter(LandscapeLyricsView, index);
+            ScrollLyricToCenter(PortraitLyricsView, index);
         }
 
         
@@ -297,39 +297,9 @@ namespace WpfMusicPlayer
             }
         }
 
-        private static void ScrollLyricToCenter(ListBox listBox, int index)
+        private static void ScrollLyricToCenter(LyricsView lyricsView, int index)
         {
-            if (index < 0 || index >= listBox.Items.Count) return;
-
-            listBox.SelectedIndex = index;
-            listBox.UpdateLayout();
-
-            var container = (FrameworkElement?)listBox.ItemContainerGenerator.ContainerFromIndex(index);
-            if (container == null) return;
-
-            var scrollViewer = FindParentScrollViewer(listBox);
-            if (scrollViewer == null) return;
-
-            var transform = container.TransformToAncestor(scrollViewer);
-            var itemPosition = transform.Transform(new Point(0, 0));
-
-            var itemCenter = itemPosition.Y + container.ActualHeight / 2;
-            var viewportCenter = scrollViewer.ViewportHeight / 2;
-            var targetOffset = scrollViewer.VerticalOffset + itemCenter - viewportCenter;
-
-            ScrollAnimationHelper.AnimateScrollToVerticalOffset(
-                scrollViewer, targetOffset, TimeSpan.FromMilliseconds(250));
-        }
-
-        private static ScrollViewer? FindParentScrollViewer(DependencyObject child)
-        {
-            var parent = VisualTreeHelper.GetParent(child);
-            while (parent != null)
-            {
-                if (parent is ScrollViewer sv) return sv;
-                parent = VisualTreeHelper.GetParent(parent);
-            }
-            return null;
+            lyricsView.ScrollLyricToCenter(index);
         }
 
         private bool _closeConfirmed;
@@ -636,7 +606,7 @@ namespace WpfMusicPlayer
                 Dispatcher.BeginInvoke(() =>
                 {
                     ScrollLyricToCenter(
-                        _isPortrait ? PortraitLyricsView.LyricsList : LandscapeLyricsView.LyricsList,
+                        _isPortrait ? PortraitLyricsView : LandscapeLyricsView,
                         ViewModel.Lyrics.CurrentLyricIndex);
                 }, DispatcherPriority.Loaded);
             };
@@ -765,7 +735,7 @@ namespace WpfMusicPlayer
             Dispatcher.BeginInvoke(() =>
             {
                 ScrollLyricToCenter(
-                    _isPortrait ? PortraitLyricsView.LyricsList : LandscapeLyricsView.LyricsList,
+                    _isPortrait ? PortraitLyricsView : LandscapeLyricsView,
                     ViewModel.Lyrics.CurrentLyricIndex);
             }, DispatcherPriority.Loaded);
         }

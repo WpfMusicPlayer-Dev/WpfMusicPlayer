@@ -5,13 +5,10 @@
              xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
              xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
              xmlns:vm="clr-namespace:WpfMusicPlayer.ViewModels"
-             xmlns:helpers="clr-namespace:WpfMusicPlayer.Helpers"
              xmlns:local="clr-namespace:WpfMusicPlayer.Views"
              mc:Ignorable="d"
              d:DataContext="{d:DesignInstance Type=vm:LyricsViewModel}">
     <UserControl.Resources>
-        <helpers:KaraokeClipConverter x:Key="KaraokeClipConverter"/>
-
         <Style x:Key="LyricsScrollBarThumb" TargetType="Thumb">
             <Setter Property="OverridesDefaultStyle" Value="True"/>
             <Setter Property="IsTabStop" Value="False"/>
@@ -52,353 +49,110 @@
             </Setter>
         </Style>
 
-        <Style x:Key="LyricsScrollViewerStyle" TargetType="ScrollViewer">
-            <Setter Property="Template">
-                <Setter.Value>
-                    <ControlTemplate TargetType="ScrollViewer">
-                        <Grid>
-                            <ScrollContentPresenter/>
-                            <ScrollBar x:Name="PART_VerticalScrollBar"
-                                       HorizontalAlignment="Right"
-                                       Orientation="Vertical"
-                                       Style="{StaticResource LyricsScrollBarStyle}"
-                                       Maximum="{TemplateBinding ScrollableHeight}"
-                                       ViewportSize="{TemplateBinding ViewportHeight}"
-                                       Value="{TemplateBinding VerticalOffset}"
-                                       Visibility="{TemplateBinding ComputedVerticalScrollBarVisibility}"/>
-                        </Grid>
-                    </ControlTemplate>
-                </Setter.Value>
-            </Setter>
-        </Style>
-
-        <DataTemplate x:Key="LyricItemTemplate" DataType="{x:Type vm:LyricLineViewModel}">
-            <StackPanel Margin="0,8"
-                Tag="{Binding DataContext, 
-                      RelativeSource={RelativeSource AncestorType=local:LyricsView}}">
-                <Grid ClipToBounds="True">
-                <helpers:MarqueeContainer IsUnbounded="{Binding IsProgressEnabled}">
-                <Grid helpers:MarqueeBehavior.IsActive="{Binding IsHighlighted}"
-                      helpers:MarqueeBehavior.Progress="{Binding Progress}"
-                      helpers:MarqueeBehavior.IsProgressDriven="{Binding IsProgressEnabled}">
-                    <Grid.Style>
-                        <Style TargetType="Grid">
-                            <Style.Triggers>
-                                <DataTrigger Binding="{Binding IsProgressEnabled}" Value="True">
-                                    <Setter Property="HorizontalAlignment" Value="Center"/>
-                                </DataTrigger>
-                            </Style.Triggers>
-                        </Style>
-                    </Grid.Style>
-                    <!-- Base lyric text -->
-                            <TextBlock Text="{Binding Text}">
-                                <TextBlock.Style>
-                                    <Style TargetType="TextBlock">
-                                        <Setter Property="TextWrapping" Value="Wrap"/>
-                                        <Setter Property="TextAlignment" Value="Center"/>
-                                        <Setter Property="Foreground" Value="#88DDDDDD"/>
-                                        <Setter Property="FontSize" Value="16"/>
-                                        <Setter Property="FontWeight" Value="Normal"/>
-                                        <Style.Triggers>
-                                            <DataTrigger Binding="{Binding IsProgressEnabled}" Value="True">
-                                                <Setter Property="TextWrapping" Value="NoWrap"/>
-                                            </DataTrigger>
-                                            <DataTrigger Binding="{Binding IsHighlighted}" Value="True">
-                                                <Setter Property="Foreground" Value="White"/>
-                                                <Setter Property="FontWeight" Value="Bold"/>
-                                                <DataTrigger.EnterActions>
-                                                    <BeginStoryboard>
-                                                        <Storyboard>
-                                                            <DoubleAnimation Storyboard.TargetProperty="FontSize"
-                                                                     To="22" Duration="0:0:0.25">
-                                                                <DoubleAnimation.EasingFunction>
-                                                                    <CubicEase EasingMode="EaseOut"/>
-                                                                </DoubleAnimation.EasingFunction>
-                                                            </DoubleAnimation>
-                                                        </Storyboard>
-                                                    </BeginStoryboard>
-                                                </DataTrigger.EnterActions>
-                                                <DataTrigger.ExitActions>
-                                                    <BeginStoryboard>
-                                                        <Storyboard>
-                                                            <DoubleAnimation Storyboard.TargetProperty="FontSize"
-                                                                     To="16" Duration="0:0:0.25">
-                                                                <DoubleAnimation.EasingFunction>
-                                                                    <CubicEase EasingMode="EaseOut"/>
-                                                                </DoubleAnimation.EasingFunction>
-                                                            </DoubleAnimation>
-                                                        </Storyboard>
-                                                    </BeginStoryboard>
-                                                </DataTrigger.ExitActions>
-                                            </DataTrigger>
-                                            <!-- When karaoke is active, dim the base so the white overlay stands out -->
-                                            <MultiDataTrigger>
-                                                <MultiDataTrigger.Conditions>
-                                                    <Condition Binding="{Binding IsHighlighted}" Value="True"/>
-                                                    <Condition Binding="{Binding IsProgressEnabled}" Value="True"/>
-                                                </MultiDataTrigger.Conditions>
-                                                <Setter Property="Foreground" Value="#AADDDDDD"/>
-                                            </MultiDataTrigger>
-                                        </Style.Triggers>
-                                    </Style>
-                                </TextBlock.Style>
-                            </TextBlock>
-                            <!-- 卡拉ok显示 （现在歌词横向滚动，所以只用做简单裁剪，无需逐字高亮，优化性能）-->
-                            <TextBlock Text="{Binding Text}" TextWrapping="NoWrap"
-                               Foreground="White" IsHitTestVisible="False">
-                        <TextBlock.Style>
-                            <Style TargetType="TextBlock">
-                                <Setter Property="FontSize" Value="16"/>
-                                <Setter Property="FontWeight" Value="Normal"/>
-                                <Setter Property="Visibility" Value="Collapsed"/>
-                                <Style.Triggers>
-                                    <MultiDataTrigger>
-                                        <MultiDataTrigger.Conditions>
-                                            <Condition Binding="{Binding IsHighlighted}" Value="True"/>
-                                            <Condition Binding="{Binding IsProgressEnabled}" Value="True"/>
-                                        </MultiDataTrigger.Conditions>
-                                        <Setter Property="Visibility" Value="Visible"/>
-                                        <Setter Property="Clip">
-                                            <Setter.Value>
-                                                <MultiBinding Converter="{StaticResource KaraokeClipConverter}">
-                                                    <Binding Path="Progress"/>
-                                                    <Binding Path="ActualWidth" RelativeSource="{RelativeSource Self}"/>
-                                                </MultiBinding>
-                                            </Setter.Value>
-                                        </Setter>
-                                    </MultiDataTrigger>
-                                    <DataTrigger Binding="{Binding IsHighlighted}" Value="True">
-                                        <Setter Property="FontWeight" Value="Bold"/>
-                                        <DataTrigger.EnterActions>
-                                            <BeginStoryboard>
-                                                <Storyboard>
-                                                    <DoubleAnimation Storyboard.TargetProperty="FontSize"
-                                                                     To="22" Duration="0:0:0.25">
-                                                        <DoubleAnimation.EasingFunction>
-                                                            <CubicEase EasingMode="EaseOut"/>
-                                                        </DoubleAnimation.EasingFunction>
-                                                    </DoubleAnimation>
-                                                </Storyboard>
-                                            </BeginStoryboard>
-                                        </DataTrigger.EnterActions>
-                                        <DataTrigger.ExitActions>
-                                            <BeginStoryboard>
-                                                <Storyboard>
-                                                    <DoubleAnimation Storyboard.TargetProperty="FontSize"
-                                                                     To="16" Duration="0:0:0.25">
-                                                        <DoubleAnimation.EasingFunction>
-                                                            <CubicEase EasingMode="EaseOut"/>
-                                                        </DoubleAnimation.EasingFunction>
-                                                    </DoubleAnimation>
-                                                </Storyboard>
-                                            </BeginStoryboard>
-                                        </DataTrigger.ExitActions>
-                                    </DataTrigger>
-                                </Style.Triggers>
-                            </Style>
-                        </TextBlock.Style>
-                    </TextBlock>
-                </Grid>
-                </helpers:MarqueeContainer>
-                </Grid>
-                <TextBlock Text="{Binding Translation}" TextAlignment="Center" TextWrapping="Wrap" Margin="0,2,0,0">
-                    <TextBlock.Style>
-                        <Style TargetType="TextBlock">
-                            <Setter Property="Foreground" Value="#66DDDDDD"/>
-                            <Setter Property="FontSize" Value="13"/>
-                            <Setter Property="Visibility" Value="Collapsed"/>
-                            <Style.Triggers>
-                                <MultiDataTrigger>
-                                    <MultiDataTrigger.Conditions>
-                                        <Condition Binding="{Binding HasTranslation}" Value="True"/>
-                                        <Condition Binding="{Binding DataContext.IsTranslationVisible, RelativeSource={RelativeSource AncestorType=local:LyricsView}}" Value="True"/>
-                                    </MultiDataTrigger.Conditions>
-                                    <Setter Property="Visibility" Value="Visible"/>
-                                </MultiDataTrigger>
-                                <DataTrigger Binding="{Binding IsHighlighted}" Value="True">
-                                    <Setter Property="Foreground" Value="#BBDDDDDD"/>
-                                    <DataTrigger.EnterActions>
-                                        <BeginStoryboard>
-                                            <Storyboard>
-                                                <DoubleAnimation Storyboard.TargetProperty="FontSize"
-                                                                 To="15" Duration="0:0:0.25">
-                                                    <DoubleAnimation.EasingFunction>
-                                                        <CubicEase EasingMode="EaseOut"/>
-                                                    </DoubleAnimation.EasingFunction>
-                                                </DoubleAnimation>
-                                            </Storyboard>
-                                        </BeginStoryboard>
-                                    </DataTrigger.EnterActions>
-                                    <DataTrigger.ExitActions>
-                                        <BeginStoryboard>
-                                            <Storyboard>
-                                                <DoubleAnimation Storyboard.TargetProperty="FontSize"
-                                                                 To="13" Duration="0:0:0.25">
-                                                    <DoubleAnimation.EasingFunction>
-                                                        <CubicEase EasingMode="EaseOut"/>
-                                                    </DoubleAnimation.EasingFunction>
-                                                </DoubleAnimation>
-                                            </Storyboard>
-                                        </BeginStoryboard>
-                                    </DataTrigger.ExitActions>
-                                </DataTrigger>
-                            </Style.Triggers>
-                        </Style>
-                    </TextBlock.Style>
-                </TextBlock>
-                <TextBlock Text="{Binding Romanji}" TextAlignment="Center" TextWrapping="Wrap" Margin="0,2,0,0">
-                    <TextBlock.Style>
-                        <Style TargetType="TextBlock">
-                            <Setter Property="Foreground" Value="#66DDDDDD"/>
-                            <Setter Property="FontSize" Value="13"/>
-                            <Setter Property="Visibility" Value="Collapsed"/>
-                            <Style.Triggers>
-                                <MultiDataTrigger>
-                                    <MultiDataTrigger.Conditions>
-                                        <Condition Binding="{Binding HasRomanji}" Value="True"/>
-                                        <Condition Binding="{Binding DataContext.IsRomanjiVisible, RelativeSource={RelativeSource AncestorType=local:LyricsView}}" Value="True"/>
-                                    </MultiDataTrigger.Conditions>
-                                    <Setter Property="Visibility" Value="Visible"/>
-                                </MultiDataTrigger>
-                                <DataTrigger Binding="{Binding IsHighlighted}" Value="True">
-                                    <Setter Property="Foreground" Value="#BBDDDDDD"/>
-                                    <DataTrigger.EnterActions>
-                                        <BeginStoryboard>
-                                            <Storyboard>
-                                                <DoubleAnimation Storyboard.TargetProperty="FontSize"
-                                                 To="15" Duration="0:0:0.25">
-                                                    <DoubleAnimation.EasingFunction>
-                                                        <CubicEase EasingMode="EaseOut"/>
-                                                    </DoubleAnimation.EasingFunction>
-                                                </DoubleAnimation>
-                                            </Storyboard>
-                                        </BeginStoryboard>
-                                    </DataTrigger.EnterActions>
-                                    <DataTrigger.ExitActions>
-                                        <BeginStoryboard>
-                                            <Storyboard>
-                                                <DoubleAnimation Storyboard.TargetProperty="FontSize"
-                                                 To="13" Duration="0:0:0.25">
-                                                    <DoubleAnimation.EasingFunction>
-                                                        <CubicEase EasingMode="EaseOut"/>
-                                                    </DoubleAnimation.EasingFunction>
-                                                </DoubleAnimation>
-                                            </Storyboard>
-                                        </BeginStoryboard>
-                                    </DataTrigger.ExitActions>
-                                </DataTrigger>
-                            </Style.Triggers>
-                        </Style>
-                    </TextBlock.Style>
-                </TextBlock>
-                <StackPanel.ContextMenu>
-                    <ContextMenu>
-                        <ContextMenu.Template>
-                            <ControlTemplate TargetType="ContextMenu">
-                                <Border Background="#2D2D2D" BorderBrush="#444444" BorderThickness="1"
-                                        CornerRadius="4" Padding="0,4">
-                                    <StackPanel IsItemsHost="True"/>
+        <ContextMenu x:Key="LyricLineContextMenu">
+            <ContextMenu.Template>
+                <ControlTemplate TargetType="ContextMenu">
+                    <Border Background="#2D2D2D" BorderBrush="#444444" BorderThickness="1"
+                            CornerRadius="4" Padding="0,4">
+                        <StackPanel IsItemsHost="True"/>
+                    </Border>
+                </ControlTemplate>
+            </ContextMenu.Template>
+            <ContextMenu.Resources>
+                <Style TargetType="MenuItem">
+                    <Setter Property="Foreground" Value="White"/>
+                    <Setter Property="Template">
+                        <Setter.Value>
+                            <ControlTemplate TargetType="MenuItem">
+                                <Border x:Name="Bd" Background="Transparent" Padding="10,6">
+                                    <StackPanel Orientation="Horizontal">
+                                        <ContentPresenter ContentSource="Icon" Margin="0,0,8,0" VerticalAlignment="Center"/>
+                                        <ContentPresenter ContentSource="Header" VerticalAlignment="Center"
+                                                          TextBlock.Foreground="{TemplateBinding Foreground}"/>
+                                    </StackPanel>
                                 </Border>
+                                <ControlTemplate.Triggers>
+                                    <Trigger Property="IsMouseOver" Value="True">
+                                        <Setter TargetName="Bd" Property="Background" Value="#3D3D3D"/>
+                                    </Trigger>
+                                    <Trigger Property="IsEnabled" Value="False">
+                                        <Setter Property="Opacity" Value="0.5"/>
+                                    </Trigger>
+                                </ControlTemplate.Triggers>
                             </ControlTemplate>
-                        </ContextMenu.Template>
-                        <ContextMenu.Resources>
-                            <Style TargetType="MenuItem">
-                                <Setter Property="Foreground" Value="White"/>
-                                <Setter Property="Template">
-                                    <Setter.Value>
-                                        <ControlTemplate TargetType="MenuItem">
-                                            <Border x:Name="Bd" Background="Transparent" Padding="10,6">
-                                                <StackPanel Orientation="Horizontal">
-                                                    <ContentPresenter ContentSource="Icon" Margin="0,0,8,0" VerticalAlignment="Center"/>
-                                                    <ContentPresenter ContentSource="Header" VerticalAlignment="Center"
-                                                                      TextBlock.Foreground="{TemplateBinding Foreground}"/>
-                                                </StackPanel>
-                                            </Border>
-                                            <ControlTemplate.Triggers>
-                                                <Trigger Property="IsMouseOver" Value="True">
-                                                    <Setter TargetName="Bd" Property="Background" Value="#3D3D3D"/>
-                                                </Trigger>
-                                                <Trigger Property="IsEnabled" Value="False">
-                                                    <Setter Property="Opacity" Value="0.5"/>
-                                                </Trigger>
-                                            </ControlTemplate.Triggers>
-                                        </ControlTemplate>
-                                    </Setter.Value>
-                                </Setter>
-                            </Style>
-                        </ContextMenu.Resources>
-                        <MenuItem Header="复制歌词" Command="{Binding CopyLyricTextCommand}">
-                            <MenuItem.Icon>
-                                <TextBlock Text="&#xF0E3;" FontFamily="Segoe MDL2 Assets" FontSize="12" Foreground="White"/>
-                            </MenuItem.Icon>
-                        </MenuItem>
-                        <MenuItem Header="复制翻译"
-                                  Command="{Binding CopyLyricTranslationCommand}">
-                            <MenuItem.Icon>
-                                <TextBlock Text="译" FontSize="12" Foreground="White"/>
-                            </MenuItem.Icon>
-                            <MenuItem.Style>
-                                <Style TargetType="MenuItem" BasedOn="{StaticResource {x:Type MenuItem}}">
-                                    <Style.Triggers>
-                                        <DataTrigger Binding="{Binding HasTranslation}" Value="False">
-                                            <Setter Property="Visibility" Value="Collapsed"/>
-                                        </DataTrigger>
-                                    </Style.Triggers>
-                                </Style>
-                            </MenuItem.Style>
-                        </MenuItem>
-                        <MenuItem Header="复制罗马音"
-                                  Command="{Binding CopyLyricRomanjiCommand}">
-                            <MenuItem.Icon>
-                                <TextBlock Text="あ" FontSize="12" Foreground="White"/>
-                            </MenuItem.Icon>
-                            <MenuItem.Style>
-                                <Style TargetType="MenuItem" BasedOn="{StaticResource {x:Type MenuItem}}">
-                                    <Style.Triggers>
-                                        <DataTrigger Binding="{Binding HasRomanji}" Value="False">
-                                            <Setter Property="Visibility" Value="Collapsed"/>
-                                        </DataTrigger>
-                                    </Style.Triggers>
-                                </Style>
-                            </MenuItem.Style>
-                        </MenuItem>
-                        <Separator Background="#444444" Height="1" Margin="4,2"/>
-                        <MenuItem Header="加载自定义歌词"
-                                  Command="{Binding PlacementTarget.Tag.LoadCustomLyricsCommand,
-                                                    RelativeSource={RelativeSource AncestorType=ContextMenu}}">
-                            <MenuItem.Icon>
-                                <TextBlock Text="&#xE8E5;" FontFamily="Segoe MDL2 Assets" FontSize="12" Foreground="White"/>
-                            </MenuItem.Icon>
-                        </MenuItem>
-                        <MenuItem Header="导出WPLRC"
-                                  Command="{Binding PlacementTarget.Tag.ExportWplrcCommand,
-                                                    RelativeSource={RelativeSource AncestorType=ContextMenu}}">
-                            <MenuItem.Icon>
-                                <TextBlock Text="&#xE74E;" FontFamily="Segoe MDL2 Assets" FontSize="12" Foreground="White"/>
-                            </MenuItem.Icon>
-                        </MenuItem>
-                        
-                        <MenuItem Header="调节歌词延迟"
-                                  Command="{Binding PlacementTarget.Tag.AdjustLrcOffsetCommand,
-                                                    RelativeSource={RelativeSource AncestorType=ContextMenu}}">
-                            <MenuItem.Icon>
-                                <TextBlock Text="&#xE9E9;" FontFamily="Segoe MDL2 Assets" FontSize="12" Foreground="White"/>
-                            </MenuItem.Icon>
-                        </MenuItem>
-                    </ContextMenu>
-                </StackPanel.ContextMenu>
-            </StackPanel>
-        </DataTemplate>
+                        </Setter.Value>
+                    </Setter>
+                </Style>
+            </ContextMenu.Resources>
+            <MenuItem Header="复制歌词" Command="{Binding CopyLyricTextCommand}">
+                <MenuItem.Icon>
+                    <TextBlock Text="&#xF0E3;" FontFamily="Segoe MDL2 Assets" FontSize="12" Foreground="White"/>
+                </MenuItem.Icon>
+            </MenuItem>
+            <MenuItem Header="复制翻译"
+                      Command="{Binding CopyLyricTranslationCommand}">
+                <MenuItem.Icon>
+                    <TextBlock Text="译" FontSize="12" Foreground="White"/>
+                </MenuItem.Icon>
+                <MenuItem.Style>
+                    <Style TargetType="MenuItem" BasedOn="{StaticResource {x:Type MenuItem}}">
+                        <Style.Triggers>
+                            <DataTrigger Binding="{Binding HasTranslation}" Value="False">
+                                <Setter Property="Visibility" Value="Collapsed"/>
+                            </DataTrigger>
+                        </Style.Triggers>
+                    </Style>
+                </MenuItem.Style>
+            </MenuItem>
+            <MenuItem Header="复制罗马音"
+                      Command="{Binding CopyLyricRomanjiCommand}">
+                <MenuItem.Icon>
+                    <TextBlock Text="あ" FontSize="12" Foreground="White"/>
+                </MenuItem.Icon>
+                <MenuItem.Style>
+                    <Style TargetType="MenuItem" BasedOn="{StaticResource {x:Type MenuItem}}">
+                        <Style.Triggers>
+                            <DataTrigger Binding="{Binding HasRomanji}" Value="False">
+                                <Setter Property="Visibility" Value="Collapsed"/>
+                            </DataTrigger>
+                        </Style.Triggers>
+                    </Style>
+                </MenuItem.Style>
+            </MenuItem>
+            <Separator Background="#444444" Height="1" Margin="4,2"/>
+            <MenuItem Header="加载自定义歌词"
+                      Command="{Binding PlacementTarget.Tag.LoadCustomLyricsCommand,
+                                        RelativeSource={RelativeSource AncestorType=ContextMenu}}">
+                <MenuItem.Icon>
+                    <TextBlock Text="&#xE8E5;" FontFamily="Segoe MDL2 Assets" FontSize="12" Foreground="White"/>
+                </MenuItem.Icon>
+            </MenuItem>
+            <MenuItem Header="导出WPLRC"
+                      Command="{Binding PlacementTarget.Tag.ExportWplrcCommand,
+                                        RelativeSource={RelativeSource AncestorType=ContextMenu}}">
+                <MenuItem.Icon>
+                    <TextBlock Text="&#xE74E;" FontFamily="Segoe MDL2 Assets" FontSize="12" Foreground="White"/>
+                </MenuItem.Icon>
+            </MenuItem>
+            <MenuItem Header="调节歌词延迟"
+                      Command="{Binding PlacementTarget.Tag.AdjustLrcOffsetCommand,
+                                        RelativeSource={RelativeSource AncestorType=ContextMenu}}">
+                <MenuItem.Icon>
+                    <TextBlock Text="&#xE9E9;" FontFamily="Segoe MDL2 Assets" FontSize="12" Foreground="White"/>
+                </MenuItem.Icon>
+            </MenuItem>
+        </ContextMenu>
     </UserControl.Resources>
 
     <Grid>
-        <ScrollViewer HorizontalScrollBarVisibility="Disabled"
-                      VerticalScrollBarVisibility="Auto"
-                      Style="{StaticResource LyricsScrollViewerStyle}">
-            <ScrollViewer.RenderTransform>
+        <local:LyricsD2DControl x:Name="LyricsCanvas"
+                                Tag="{Binding}"
+                                ScrollBarStyle="{StaticResource LyricsScrollBarStyle}"
+                                LineContextMenu="{StaticResource LyricLineContextMenu}">
+            <local:LyricsD2DControl.RenderTransform>
                 <TranslateTransform x:Name="LyricsTranslateTransform"/>
-            </ScrollViewer.RenderTransform>
-            <ScrollViewer.ContextMenu>
+            </local:LyricsD2DControl.RenderTransform>
+            <local:LyricsD2DControl.ContextMenu>
                 <ContextMenu>
                     <ContextMenu.Template>
                         <ControlTemplate TargetType="ContextMenu">
@@ -453,15 +207,8 @@
                         </MenuItem.Icon>
                     </MenuItem>
                 </ContextMenu>
-            </ScrollViewer.ContextMenu>
-            <ListBox x:Name="InternalLyricsList" ItemsSource="{Binding Lyrics}" Background="Transparent" BorderThickness="0"
-                     HorizontalContentAlignment="Stretch"
-                     HorizontalAlignment="Stretch" ScrollViewer.HorizontalScrollBarVisibility="Disabled"
-                     ScrollViewer.VerticalScrollBarVisibility="Disabled"
-                     PreviewMouseLeftButtonUp="LyricsList_PreviewMouseLeftButtonUp"
-                     PreviewMouseWheel="LyricsList_PreviewMouseWheel"
-                     ItemTemplate="{StaticResource LyricItemTemplate}"/>
-        </ScrollViewer>
+            </local:LyricsD2DControl.ContextMenu>
+        </local:LyricsD2DControl>
 
         <StackPanel Orientation="{Binding ButtonOrientation, RelativeSource={RelativeSource AncestorType=local:LyricsView}}"
                     VerticalAlignment="Bottom" HorizontalAlignment="Right"
